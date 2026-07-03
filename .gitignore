@@ -1,0 +1,8 @@
+.venv/
+.env
+__pycache__/
+*.pyc
+memory_registry.json
+event_log.json
+pending_conflict.json
+demo_repo/
