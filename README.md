@@ -228,12 +228,13 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 8. **Green/red check:** a clean PR → `CodeMind / memory` → `success` ("No contradiction with past decisions"); a conflicting PR → `failure`. Both verified live (PRs #4 red, #6 green on this repo).
 9. **Auto-ingest (dry-run):** `python ingest.py --repo . --since <sha> --head <sha> --dry-run` → extracts decisions from the range and prints them, **without** calling `remember()`. Verified locally. The live `codemind-ingest.yml` runs the same in `--since`/`--head` mode on push to main (opt-in via `vars.CODEMIND_AUTO_INGEST=true`).
 10. **Cross-repo shared memory:** `bash scripts/setup_cross_repo.sh <you>/codemind-cross-b` → repo B (no local registry) catches a Redis→Map PR citing a decision remembered in repo A, via the shared Cloud graph. Mechanism already proven live: PR #6 ran with `local signals: 0` and the shared graph surfaced 12 nodes + the correct verdict.
+11. **Unit tests:** `.venv/bin/python -m unittest discover -s tests` → 11 tests covering the registry fuzzy-match (reconcile's data_id lookup), the hybrid-retrieval keyword/path signals, and the GitHub comment idempotency marker + graph-evidence formatting. (The fuzzy-match test caught a real punctuation bug — `Redis;` wasn't matching `redis` — now fixed.)
 
 ### CI demo (the live loop, ~90s — for the recording)
 The terminal demo above is the thesis; this is the product running in real CI. Live artifacts on this repo to show on camera:
 1. **PR #4** (https://github.com/kajal-jotwani/Hangover/pull/4) — a teammate's Redis→Map PR. Show the bot comment with the **Graph evidence** block (cites the actual Cognee node *"Cache layer must be Redis"*) and the **red `CodeMind / memory` check** in the PR summary.
 2. **PR #6** (https://github.com/kajal-jotwani/Hangover/pull/6) — a clean PR. Show the **green `CodeMind / memory` check** ("No contradiction with past decisions"). Same check, green vs red.
-3. **Dashboard** — `python dashboard/build.py && open dashboard/index.html` → the live Cognee memory graph (16 nodes), the lifecycle-footprint badges, the belief-changed timeline.
+3. **Dashboard** — `python dashboard/build.py && open dashboard/index.html` → the live Cognee memory graph (16 nodes), the lifecycle-footprint badges, the belief-changed timeline. A static snapshot is pushed to the `gh-pages` branch; enable GitHub Pages (Settings → Pages → Source: `gh-pages`) to get a live linkable dashboard at `https://<owner>.github.io/<repo>/`.
 4. **Cross-repo (optional closer):** `bash scripts/setup_cross_repo.sh <you>/codemind-cross-b` → repo B catches the same mistake using a decision remembered in repo A — org-wide memory.
 5. **Reconcile (optional):** reply `/codemind confirm intentional, single-instance deploy` on PR #4 → the check flips red→green + an after-recall comment shows the answer changed. *(Mutates the demo graph — run `bash scripts/setup.sh` after to reset.)*
 

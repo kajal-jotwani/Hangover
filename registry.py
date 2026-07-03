@@ -10,11 +10,21 @@ feeds the (stretch) dashboard and the demo's 'belief changed' visual.
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
 
 from config import EVENT_LOG_PATH, REGISTRY_PATH
+
+
+def _words(text: str) -> set[str]:
+    """Significant word tokens, punctuation-stripped + lowercased, len > 4.
+
+    Used by the fuzzy match so 'Redis;' (punctuation attached) still matches
+    'redis' — reconcile confirm relies on this to find the right data_id to forget.
+    """
+    return {w for w in re.findall(r"[A-Za-z_][A-Za-z0-9_-]+", (text or "").lower()) if len(w) > 4}
 
 
 def _read(path: Path, default: Any) -> Any:
@@ -90,12 +100,12 @@ def find_by_decision_text(decision_text: str) -> dict | None:
             continue
         if needle and needle in (entry.get("decision") or "").lower():
             return entry
-    # loose: shared significant words
-    needle_words = {w for w in needle.split() if len(w) > 4}
+    # loose: shared significant words (punctuation-stripped so 'Redis;' matches 'redis')
+    needle_words = _words(needle)
     for entry in reg.values():
         if entry.get("status") != "active":
             continue
-        dec_words = {w for w in (entry.get("decision") or "").lower().split() if len(w) > 4}
+        dec_words = _words(entry.get("decision") or "")
         if needle_words and len(needle_words & dec_words) >= 2:
             return entry
     return None
