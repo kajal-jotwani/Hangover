@@ -41,7 +41,10 @@ async def main() -> None:
     print("connected.\n")
 
     # 1. remember two tiny facts into a SPIKE-specific dataset (don't pollute the real one)
-    spike_ds = "codemind_spike"
+    # Use a fresh name each run to avoid any server-side bad state left by a
+    # prior partially-cleaned dataset.
+    import time
+    spike_ds = f"codemind_spike_{int(time.time())}"
     print(f"remembering two facts into dataset={spike_ds} ...")
     r1 = await cognee.remember("Decision A: always use apiClient for HTTP.", dataset_name=spike_ds)
     r2 = await cognee.remember("Decision B: cache layer is Redis.", dataset_name=spike_ds)

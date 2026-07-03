@@ -107,6 +107,15 @@ def _extract_data_id(result: Any) -> str | None:
                     return got
     # Dict-like
     if isinstance(result, dict):
+        # The live cloud SDK returns {"items": [{"id": <uuid>, ...}, ...]} —
+        # the per-item data_id is the id of the last inserted item.
+        items = result.get("items")
+        if isinstance(items, list) and items:
+            last = items[-1]
+            if isinstance(last, dict):
+                got = _coerce_id(last.get("id") or last.get("data_id"))
+                if got:
+                    return got
         for k in ("data_id", "id", "data_item_id", "item_id"):
             got = _coerce_id(result.get(k))
             if got:
@@ -117,6 +126,23 @@ def _extract_data_id(result: Any) -> str | None:
                 got = _coerce_id(data.get(k))
                 if got:
                     return got
+        # Also handle .data being a list of items
+        if isinstance(data, list) and data and isinstance(data[-1], dict):
+            got = _coerce_id(data[-1].get("id") or data[-1].get("data_id"))
+            if got:
+                return got
+    # Object with .items (list of objects/dicts)
+    items = getattr(result, "items", None) if not isinstance(result, (str, bytes)) else None
+    if isinstance(items, list) and items:
+        last = items[-1]
+        if hasattr(last, "id"):
+            got = _coerce_id(getattr(last, "id"))
+            if got:
+                return got
+        if isinstance(last, dict):
+            got = _coerce_id(last.get("id") or last.get("data_id"))
+            if got:
+                return got
     return None
 
 
@@ -196,8 +222,18 @@ async def forget_dataset() -> Any:
 
 
 async def improve_graph() -> Any:
-    """Re-weight / reconcile the graph after a belief update."""
-    return await cognee.improve(dataset_name=DATASET_NAME)
+    """Re-weight / reconcile the graph after a belief update.
+
+    Best-effort: on the cloud tenant the explicit improve() endpoint 404s, but
+    remember(self_improvement=True) already auto-runs improve() — so the graph
+    re-weights at the remember() call. We still try the explicit call in case the
+    tenant supports it, and swallow the error if not.
+    """
+    try:
+        return await cognee.improve(dataset_name=DATASET_NAME)
+    except Exception as e:
+        # Non-fatal: self_improvement=True at remember-time already re-weights.
+        return f"<improve() best-effort skipped: {e}>"
 
 
 async def datasets_status() -> Any:
