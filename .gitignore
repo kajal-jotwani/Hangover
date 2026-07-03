@@ -6,3 +6,4 @@ memory_registry.json
 event_log.json
 pending_conflict.json
 demo_repo/
+dashboard/index.html
