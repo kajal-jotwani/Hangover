@@ -17,7 +17,8 @@ on:
 # Read-only on the PR; the bot needs write to post comments, granted by the
 # default GITHUB_TOKEN. Skip running on PRs that only touch docs/CI themselves.
 permissions:
-  pull-requests: write
+  pull-requests: write   # post the conflict comment
+  statuses: write          # post the red commit-status check on the head SHA
   contents: read
 
 concurrency:
