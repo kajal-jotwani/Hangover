@@ -1,0 +1,38 @@
+{
+  "D1-27e8ca7b": {
+    "data_id": "00df3e89-d2c8-5db6-bc47-59c77e434f88",
+    "sha": "27e8ca7bfad79928ce4ec8ffdb7a56af1558d1e0",
+    "decision": "All network calls must use the apiClient wrapper instead of direct fetch() calls",
+    "rationale": "Ensures retry logic and authentication headers are always applied, preventing outages caused by bypassing these mechanisms",
+    "scope": "src/lib/apiClient.ts, all source files making HTTP requests (e.g., *.ts, *.js under src/)",
+    "importance": 0.98,
+    "status": "active"
+  },
+  "D2-7b3d4140": {
+    "data_id": "617d978a-a061-59d7-a729-d210150469e0",
+    "sha": "7b3d4140b7d9196ff12640e8e0764867b044f80e",
+    "decision": "Cache layer must be Redis; never use in-memory Map caches; always use cacheGet/cacheSet",
+    "rationale": "In\u2011process caches cause stale data across multiple instances, which led to the Mar\u202f2 stale\u2011config incident. Using Redis provides a single source of truth for all instances.",
+    "scope": "src/lib/cache.ts, any code that accesses caching",
+    "importance": 0.98,
+    "status": "active"
+  },
+  "D3-78840811": {
+    "data_id": "6951b237-2b2f-5305-9ece-184d84735d60",
+    "sha": "78840811e20f40d308a64f0afaaa2f60a47f5f07",
+    "decision": "Do not simplify or refactor the LEGACY_LINE regex in src/utils/legacyRegex.ts",
+    "rationale": "The regex's alternation handles a legacy customer format (Acme Corp) that escapes delimiters differently; simplifying it breaks those imports silently.",
+    "scope": "src/utils/legacyRegex.ts",
+    "importance": 0.97,
+    "status": "active"
+  },
+  "D4-6f2ef5f1": {
+    "data_id": "2274bf26-1ba6-51f5-b810-c02679912c05",
+    "sha": "6f2ef5f1559217b5c5f5ede9cd843efc894731f2",
+    "decision": "All logging must go through src/lib/logger.ts and never use console.log in application code",
+    "rationale": "Structured JSON logs are required for log\u2011aggregator alerts; unstructured console.log entries broke alerts on May\u202f9, so using the shared logger ensures consistent log shape.",
+    "scope": "src/lib/logger.ts, src/**/*.ts",
+    "importance": 0.97,
+    "status": "active"
+  }
+}
