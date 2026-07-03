@@ -1,4 +1,5 @@
-"""LLM calls for the two custom reasoning steps:
+"""LLM calls for the two custom reasoning steps, served by a LOCAL Ollama model
+via its OpenAI-compatible endpoint (http://localhost:11434/v1).
 
   - extract_decision(commit_msg, diff) -> dict | None
       Pulls a durable engineering decision out of a commit. Returns None if there
@@ -9,7 +10,8 @@
       not literal ("uses fetch" must be caught even if the memory says "use
       apiClient" in different wording).
 
-Uses the Anthropic SDK directly, independent of Cognee's configured LLM backend.
+Note: Cognee Cloud runs its OWN LLM for graph ingestion server-side; these calls
+are purely our extraction/judgment prompts and never touch Cognee's backend LLM.
 """
 from __future__ import annotations
 
@@ -17,19 +19,18 @@ import json
 import re
 from typing import Any
 
-import anthropic
+from openai import OpenAI
 
-from config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+from config import OLLAMA_BASE_URL, OLLAMA_MODEL
 
-_client: anthropic.Anthropic | None = None
+_client: OpenAI | None = None
 
 
-def _client_get() -> anthropic.Anthropic:
+def _client_get() -> OpenAI:
     global _client
     if _client is None:
-        if not ANTHROPIC_API_KEY:
-            raise SystemExit("ANTHROPIC_API_KEY not set in .env")
-        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        # api_key is required by the SDK signature but Ollama ignores it.
+        _client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
     return _client
 
 
@@ -39,7 +40,6 @@ def _extract_json(text: str) -> dict | None:
         return None
     fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     candidate = fence.group(1) if fence else text
-    # Fall back to first {...} block.
     if not candidate.strip().startswith("{"):
         m = re.search(r"\{.*\}", candidate, re.DOTALL)
         if m:
@@ -51,18 +51,29 @@ def _extract_json(text: str) -> dict | None:
 
 
 def _ask(system: str, user: str, *, max_tokens: int = 1200) -> str:
-    resp = _client_get().messages.create(
-        model=ANTHROPIC_MODEL,
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    # Concatenate text blocks
-    parts = []
-    for block in resp.content:
-        if getattr(block, "type", None) == "text":
-            parts.append(block.text)
-    return "\n".join(parts)
+    """Call the local Ollama model. Uses JSON mode when the model supports it;
+    falls back to plain text if not, and the _extract_json parser handles both."""
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    try:
+        resp = _client_get().chat.completions.create(
+            model=OLLAMA_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+    except Exception:
+        # Model doesn't advertise JSON mode -> retry without it; parser still recovers JSON.
+        resp = _client_get().chat.completions.create(
+            model=OLLAMA_MODEL,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=0.2,
+        )
+    return resp.choices[0].message.content or ""
 
 
 # ---------------------------------------------------------------------------
@@ -124,8 +135,12 @@ def judge_contradiction(diff: str, recalled_decisions: list[str]) -> dict[str, A
     data = _extract_json(raw)
     if not data:
         return {"conflict": False, "decision_violated": "", "explanation": f"<judge returned unparseable output: {raw[:200]}>", "confidence": 0.0}
+    # Ollama may emit true/false as strings; normalize.
+    conflict_val = data.get("conflict", False)
+    if isinstance(conflict_val, str):
+        conflict_val = conflict_val.strip().lower() in ("true", "yes", "1")
     return {
-        "conflict": bool(data.get("conflict", False)),
+        "conflict": bool(conflict_val),
         "decision_violated": data.get("decision_violated", "").strip(),
         "explanation": data.get("explanation", "").strip(),
         "confidence": float(data.get("confidence", 0.0) or 0.0),

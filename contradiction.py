@@ -81,7 +81,7 @@ def _entry_text(entry: dict) -> str:
 
 
 async def detect(repo_path: str, *, branch: str | None, head: str | None) -> dict:
-    check_keys(need_cognee=True, need_anthropic=True)
+    check_keys(need_cognee=True, need_llm=True)
     await cognee_client.connect()
 
     if head:

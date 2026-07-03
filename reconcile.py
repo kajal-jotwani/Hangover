@@ -35,7 +35,7 @@ def _load_conflict(arg_id: str | None) -> dict:
 
 
 async def confirm(conflict: dict, *, reason: str) -> None:
-    check_keys(need_cognee=True, need_anthropic=False)
+    check_keys(need_cognee=True, need_llm=False)
     await cognee_client.connect()
 
     old_decision = conflict.get("decision_violated", "")
@@ -94,7 +94,7 @@ async def confirm(conflict: dict, *, reason: str) -> None:
 
 
 async def reject(conflict: dict) -> None:
-    check_keys(need_cognee=True, need_anthropic=False)
+    check_keys(need_cognee=True, need_llm=False)
     await cognee_client.connect()
     console.print("[bold]reject[/bold] — the diff is a bug. NO memory change.")
     console.print(f"The old belief stands: [cyan]{conflict.get('decision_violated','')[:120]}[/cyan]")

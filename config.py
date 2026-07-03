@@ -15,9 +15,11 @@ COGNEE_URL = os.getenv("COGNEE_URL", "")
 COGNEE_API_KEY = os.getenv("COGNEE_API_KEY", "")
 DATASET_NAME = os.getenv("COGNEE_DATASET", "codemind_repo_memory")
 
-# --- Anthropic (extraction + contradiction judgment) ---
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5")
+# --- Ollama (local LLM for extraction + contradiction judgment) ---
+# Ollama exposes an OpenAI-compatible endpoint. The graph ingestion itself runs
+# on Cognee Cloud's own LLM server-side; these are only our custom reasoning calls.
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
 
 # --- GitHub (optional PR comments) ---
 GH_TOKEN = os.getenv("GH_TOKEN", "").strip()
@@ -31,13 +33,16 @@ PENDING_CONFLICT_PATH = ROOT / "pending_conflict.json"
 DEMO_REPO = ROOT / "demo_repo"
 
 
-def check_keys(*, need_cognee: bool = True, need_anthropic: bool = False) -> None:
-    """Fail fast with a clear message if required keys are missing."""
+def check_keys(*, need_cognee: bool = True, need_llm: bool = False) -> None:
+    """Fail fast with a clear message if required config is missing.
+
+    Cognee needs real Cloud credentials; the local LLM only needs a model name
+    (Ollama is keyless), but we confirm the server is reachable so failures are
+    obvious instead of a cryptic connection error mid-run.
+    """
     missing = []
     if need_cognee and not COGNEE_API_KEY:
         missing.append("COGNEE_API_KEY (and COGNEE_URL)")
-    if need_anthropic and not ANTHROPIC_API_KEY:
-        missing.append("ANTHROPIC_API_KEY")
     if missing:
         raise SystemExit(
             "Missing env vars: " + ", ".join(missing) + ". "

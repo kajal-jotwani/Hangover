@@ -75,7 +75,7 @@ demo_repo (git)  ──▶  ingest.py  ──▶  cognee.remember()  ──▶  
                                                                        │ recall()
                                                                        ▼
 new diff  ──▶  contradiction.py  ──▶  hybrid retrieval  ──▶  LLM judge  ──▶  conflict
-               (semantic recall +          (Anthropic)              │
+               (semantic recall +          (Ollama, local)          │
                 path-scope + keyword                                  ▼
                 overlap unioned)                              github.post_or_print
                                                                  │
@@ -97,7 +97,7 @@ timeline (feeds the dashboard).
 ### Files
 - `config.py` — env, constants, Cognee connection helper
 - `cognee_client.py` — async wrapper over the Cognee SDK (captures `data_id` at remember-time)
-- `llm.py` — Anthropic calls: `extract_decision()` + `judge_contradiction()` (JSON-structured)
+- `llm.py` — local LLM (Ollama, OpenAI-compatible) calls: `extract_decision()` + `judge_contradiction()` (JSON-structured)
 - `git_io.py` — read commits/diffs/branch-diffs via the git CLI
 - `registry.py` — local registry + event log + hybrid-retrieval helpers
 - `ingest.py` — Phase 1: walk history → extract → remember → registry
@@ -119,7 +119,8 @@ timeline (feeds the dashboard).
 cd codemind
 python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env
-# fill in: COGNEE_URL, COGNEE_API_KEY, ANTHROPIC_API_KEY
+# fill in: COGNEE_URL, COGNEE_API_KEY
+# local LLM: pull an Ollama model, e.g.  ollama pull qwen2.5:7b-instruct
 # (optional: GH_TOKEN, GH_REPO, GH_PR_NUMBER for real PR comments)
 ```
 
@@ -176,7 +177,7 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 
 ## Tech stack
 - **Memory:** Cognee Cloud (shared graph across contributors/CI — the whole point)
-- **LLM:** Claude (Anthropic API) for decision extraction + contradiction judgment
+- **LLM (extraction + judgment):** local Ollama model via its OpenAI-compatible endpoint (e.g. `qwen2.5:7b-instruct`) — keyless and offline. Cognee Cloud runs its own LLM for graph ingestion server-side, so the two are independent.
 - **Ingestion:** Python + git CLI reading `git log -p` and branch diffs
 - **Integration:** GitHub PR comments via GitHub API (env-gated; terminal fallback by default)
 - **Dashboard:** static HTML generated from local state (stretch)

@@ -25,7 +25,7 @@ console = Console()
 
 
 async def ingest(repo_path: str, *, reset: bool) -> None:
-    check_keys(need_cognee=True, need_anthropic=True)
+    check_keys(need_cognee=True, need_llm=True)
     await cognee_client.connect()
 
     if reset:

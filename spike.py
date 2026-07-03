@@ -35,7 +35,7 @@ def _shape(label: str, obj: object) -> None:
 
 
 async def main() -> None:
-    check_keys(need_cognee=True, need_anthropic=False)
+    check_keys(need_cognee=True, need_llm=False)
     print(f"Connecting to Cognee Cloud, dataset={DATASET_NAME} ...")
     await cognee_client.connect()
     print("connected.\n")
