@@ -44,6 +44,16 @@ async def confirm(conflict: dict, *, reason: str) -> None:
         console.print(f"[red]Could not match violated decision to a registry entry:[/red]\n  {old_decision}")
         console.print("[yellow]Proceeding to remember the update anyway, but no old memory to forget.[/yellow]")
 
+    # Seed the seen-id set with existing data_ids so remember_decision() can
+    # isolate the NEW superseded memory's id by diffing (remember() returns the
+    # full items list, not in insertion order).
+    existing_ids = {
+        v.get("data_id") for v in registry.load_registry().values()
+        if isinstance(v, dict) and v.get("data_id")
+    }
+    cognee_client.seed_seen(existing_ids)
+    console.print(f"[dim]Seeded seen-set with {len(existing_ids)} existing data_ids.[/dim]")
+
     date = time.strftime("%Y-%m-%d")
     new_text = (
         f"UPDATE as of {date}: Previous decision \"{old_decision}\" is SUPERSEDED. "

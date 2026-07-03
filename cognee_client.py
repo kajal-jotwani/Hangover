@@ -24,6 +24,21 @@ from config import COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_URL, COGNEE_USER_ID,
 
 _cloud_client = None
 
+# Track data_ids we've already seen this session, so we can isolate the NEW
+# item id from remember()'s full items list (which is NOT in insertion order).
+# Seed this from memory_registry.json before remembering into an existing dataset.
+_seen_data_ids: set[str] = set()
+
+
+def seed_seen(ids: set[str]) -> None:
+    """Pre-populate the seen-id set with data_ids already in the dataset.
+
+    Call this before remember_decision() when the dataset is non-empty (e.g.
+    reconcile.py reads memory_registry.json and seeds the existing ids so the
+    new 'superseded' memory's id can be isolated by diffing).
+    """
+    _seen_data_ids.update(ids)
+
 
 async def connect() -> None:
     """Route all Cognee ops to the Cloud tenant.
@@ -159,15 +174,47 @@ async def remember_decision(text: str, *, importance_weight: float | None = None
     """Store one decision fact. Returns {data_id, dataset_id, raw}.
 
     importance_weight nudges the graph (supports the 'memory reinforced' beat).
+
+    The new item's data_id is isolated by DIFFING the items list before/after:
+    remember() returns the FULL items list (all items in the dataset) which is
+    NOT in insertion order, so items[-1] is unreliable. We snapshot the seen set,
+    call remember, and the new id = (items_after) - (seen_before). For a non-empty
+    dataset the caller must seed_seen() with the existing ids first.
     """
     kwargs: dict[str, Any] = {"dataset_name": DATASET_NAME, "self_improvement": True}
     if importance_weight is not None:
         kwargs["importance_weight"] = importance_weight
+
+    before = set(_seen_data_ids)
     result = await cognee.remember(text, **kwargs)
+
+    # Pull the full items list (cloud mode returns a dict with 'items').
+    after_ids: set[str] = set()
+    items = []
+    if isinstance(result, dict):
+        items = result.get("items") or []
+        for it in items:
+            if isinstance(it, dict):
+                gid = _coerce_id(it.get("id") or it.get("data_id"))
+                if gid:
+                    after_ids.add(gid)
+
+    new_ids = after_ids - before
+    if new_ids:
+        data_id = new_ids.pop()
+    elif items:
+        # Fallback: dedup may have merged the new content into an existing node,
+        # or seen-set wasn't seeded. Take a best-guess and warn.
+        data_id = _coerce_id(items[-1].get("id") or items[-1].get("data_id"))
+        print(f"  [warn] could not isolate new data_id; using fallback {data_id}")
+    else:
+        data_id = _extract_data_id(result)
+
+    _seen_data_ids.update(after_ids)
     return {
-        "data_id": _extract_data_id(result),
+        "data_id": data_id,
         "dataset_id": _extract_dataset_id(result),
-        "raw": repr(result),
+        "raw": repr(result)[:300],
     }
 
 
@@ -216,8 +263,30 @@ async def forget_one(data_id: str) -> Any:
     return await cognee.forget(data_id=data_id, dataset=DATASET_NAME)
 
 
+async def forget_many(data_ids: list[str]) -> dict:
+    """Surgically forget each data_id (best-effort, continues on error).
+
+    Used for --reset. We avoid cognee.forget(dataset=...) because on the cloud
+    tenant a dataset-level delete can leave the dataset in a bad server-side
+    state (subsequent remember() 409s with a ProgrammingError). Surgical
+    per-item forget by data_id is reliable.
+    """
+    results = {"ok": 0, "failed": 0, "errors": []}
+    for did in data_ids:
+        if not did:
+            continue
+        try:
+            await cognee.forget(data_id=did, dataset=DATASET_NAME)
+            results["ok"] += 1
+        except Exception as e:
+            results["failed"] += 1
+            results["errors"].append(str(e)[:120])
+    return results
+
+
 async def forget_dataset() -> Any:
-    """Wipe the whole dataset (used by reset, not the demo)."""
+    """Wipe the whole dataset. AVOID on cloud — can corrupt the dataset. Use
+    forget_many() with per-item data_ids instead."""
     return await cognee.forget(dataset=DATASET_NAME)
 
 

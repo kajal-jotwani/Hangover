@@ -10,7 +10,7 @@ echo "==> 1. Rebuild demo_repo with seeded decisions"
 bash scripts/seed_demo_repo.sh
 
 echo
-echo "==> 2. Ingest decisions into Cognee Cloud (this calls Anthropic + Cognee)"
+echo "==> 2. Ingest decisions into Cognee Cloud (Ollama Cloud for extraction + Cognee)"
 "$PY" ingest.py --repo demo_repo --reset
 
 echo

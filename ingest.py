@@ -29,12 +29,22 @@ async def ingest(repo_path: str, *, reset: bool) -> None:
     await cognee_client.connect()
 
     if reset:
-        console.print("[yellow]Forgetting entire dataset before ingest...[/yellow]")
-        try:
-            await cognee_client.forget_dataset()
-        except Exception as e:
-            console.print(f"[dim]forget_dataset: {e}[/dim]")
+        # Surgical reset: forget each known data_id from the registry, NOT the
+        # whole dataset. cognee.forget(dataset=...) can corrupt the dataset on
+        # the cloud tenant (subsequent remember() 409s); per-item forget is safe.
+        existing = registry.load_registry()
+        data_ids = [v.get("data_id") for v in existing.values()
+                    if isinstance(v, dict) and v.get("data_id")]
+        if data_ids:
+            console.print(f"[yellow]Surgical reset: forgetting {len(data_ids)} known memories...[/yellow]")
+            res = await cognee_client.forget_many(data_ids)
+            console.print(f"  [dim]forgot {res['ok']} ok, {res['failed']} failed[/dim]")
+            if res["errors"]:
+                console.print(f"  [dim]errors: {res['errors'][:3]}[/dim]")
+        else:
+            console.print("[dim]Reset: registry empty, starting fresh.[/dim]")
         registry.save_registry({})
+        cognee_client.seed_seen(set())  # clear seen-set for clean diffing
 
     commits = log_commits(repo_path)
     console.print(f"Found {len(commits)} commits in [cyan]{repo_path}[/cyan]\n")

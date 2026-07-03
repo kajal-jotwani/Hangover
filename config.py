@@ -25,7 +25,7 @@ DATASET_NAME = os.getenv("COGNEE_DATASET", "codemind_repo_memory")
 # Base URL https://ollama.com/v1 ; auth is Bearer OLLAMA_API_KEY (sent by the SDK).
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1").strip()
 OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct").strip()
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:120b").strip()
 
 # --- GitHub (optional PR comments) ---
 GH_TOKEN = os.getenv("GH_TOKEN", "").strip()
