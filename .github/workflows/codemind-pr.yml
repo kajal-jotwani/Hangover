@@ -1,0 +1,60 @@
+# CodeMind — runs on every pull request.
+# Checks out the PR head, recalls relevant past decisions from the Cognee Cloud
+# graph, and asks the LLM to judge whether the diff contradicts any of them. On
+# conflict, posts a real PR comment (idempotent per head SHA) so the author can
+# reconcile via `/codemind confirm <reason>` or `/codemind reject` (see
+# codemind-reconcile.yml).
+#
+# Required repo secrets: COGNEE_URL, COGNEE_API_KEY, COGNEE_TENANT_ID,
+# COGNEE_USER_ID, OLLAMA_API_KEY. Optional GH_PAT overrides the default
+# GITHUB_TOKEN so comments appear under a human identity instead of the bot.
+name: CodeMind — detect contradictions
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+# Read-only on the PR; the bot needs write to post comments, granted by the
+# default GITHUB_TOKEN. Skip running on PRs that only touch docs/CI themselves.
+permissions:
+  pull-requests: write
+  contents: read
+
+concurrency:
+  group: codemind-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0  # full history — recall/ingest need commit messages
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Detect contradictions in the PR diff
+        env:
+          # GitHub context → CodeMind env (config.py reads these).
+          GH_REPO: ${{ github.repository }}
+          GH_PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          # Cognee Cloud + Ollama Cloud (repo secrets).
+          COGNEE_URL: ${{ secrets.COGNEE_URL }}
+          COGNEE_API_KEY: ${{ secrets.COGNEE_API_KEY }}
+          COGNEE_TENANT_ID: ${{ secrets.COGNEE_TENANT_ID }}
+          COGNEE_USER_ID: ${{ secrets.COGNEE_USER_ID }}
+          COGNEE_DATASET: ${{ secrets.COGNEE_DATASET }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
+        run: |
+          python contradiction.py --repo . \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head  "${{ github.event.pull_request.head.sha }}"

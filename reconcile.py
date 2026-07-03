@@ -34,9 +34,15 @@ def _load_conflict(arg_id: str | None) -> dict:
     return data
 
 
-async def confirm(conflict: dict, *, reason: str) -> None:
+async def confirm(conflict: dict, *, reason: str, query: str | None = None, ci: bool = False) -> None:
     check_keys(need_cognee=True, need_llm=False)
     await cognee_client.connect()
+
+    # The proof query makes the before/after delta legible. Default: derived from
+    # the violated decision (works for any repo in CI). Override with --query for
+    # the on-camera demo's crisp contrastive flip ("can I use an in-memory Map
+    # cache instead of Redis?").
+    proof_query = query or _proof_query_for(conflict)
 
     old_decision = conflict.get("decision_violated", "")
     entry = registry.find_by_decision_text(old_decision)
@@ -95,27 +101,32 @@ async def confirm(conflict: dict, *, reason: str) -> None:
     console.print(Panel.fit("Belief updated. Old memory forgotten, new one remembered, graph re-weighted.",
                             title="confirm", style="green"))
 
-    # The proof moment: re-query with a CONTRASTIVE query so the delta is legible.
+    # The proof moment: re-query so the before/after delta is legible.
     # Before: 'no, must use Redis'; after: 'yes, in-memory Map permitted as of
     # the update'. That before/after flip is the demo's spine.
-    console.print("\n[bold]PROOF — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
-    answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
+    console.print(f"\n[bold]PROOF — recall({proof_query!r}):[/bold]")
+    answers = await cognee_client.recall_decisions(proof_query)
     for a in answers:
         console.print(f"  - {a[:240]}")
+    if ci:
+        _post_after_comment("confirm", conflict, reason, proof_query, answers)
     await cognee_client.disconnect()
 
 
-async def reject(conflict: dict) -> None:
+async def reject(conflict: dict, *, query: str | None = None, ci: bool = False) -> None:
     check_keys(need_cognee=True, need_llm=False)
     await cognee_client.connect()
     console.print("[bold]reject[/bold] — the diff is a bug. NO memory change.")
     console.print(f"The old belief stands: [cyan]{conflict.get('decision_violated','')[:120]}[/cyan]")
     registry.append_event("reject", decision_violated=conflict.get("decision_violated", ""),
                           note="change rejected as a bug; memory unchanged")
-    console.print("\n[bold]Memory unchanged — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
-    answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
+    proof_query = query or _proof_query_for(conflict)
+    console.print(f"\n[bold]Memory unchanged — recall({proof_query!r}):[/bold]")
+    answers = await cognee_client.recall_decisions(proof_query)
     for a in answers:
         console.print(f"  - {a[:240]}")
+    if ci:
+        _post_after_comment("reject", conflict, "", proof_query, answers)
     await cognee_client.disconnect()
 
 
@@ -128,12 +139,44 @@ def _id_for(entry: dict) -> str:
     return entry.get("data_id", "unknown")
 
 
-async def _run(action: str, conflict_id: str | None, reason: str) -> None:
+def _proof_query_for(conflict: dict) -> str:
+    """Default proof query: ask whether the violated decision still holds.
+    Generic (works for any repo in CI); the demo overrides via --query."""
+    dec = (conflict.get("decision_violated") or "").strip().replace("\n", " ")
+    return f"Is the following decision still in force, or has it been superseded? {dec[:300]}"
+
+
+def _post_after_comment(action: str, conflict: dict, reason: str,
+                         query: str, answers: list[str]) -> None:
+    """In CI, surface the after-recall result as a PR comment (the loop-closing beat)."""
+    import github
+    dec = conflict.get("decision_violated", "")
+    head = ("✅" if action == "confirm" else "⛔")
+    title = "memory updated — old belief crossed out" if action == "confirm" \
+        else "memory unchanged — change rejected as a bug"
+    lines = [f"{head} **CodeMind: {title}.**", ""]
+    if action == "confirm":
+        lines.append(f"Reason: {reason}")
+        lines.append(f"Old decision: {dec[:200]}")
+        lines.append("")
+    lines.append(f"Re-asked: _{query[:160]}_")
+    lines.append("")
+    lines.append("Recall now returns:")
+    if answers:
+        for a in answers[:5]:
+            lines.append(f"- {a[:240]}")
+    else:
+        lines.append("- (no recall — graph may still be settling)")
+    github.post_result_comment("\n".join(lines))
+
+
+async def _run(action: str, conflict_id: str | None, reason: str,
+               query: str | None, ci: bool) -> None:
     conflict = _load_conflict(conflict_id)
     if action == "confirm":
-        await confirm(conflict, reason=reason)
+        await confirm(conflict, reason=reason, query=query, ci=ci)
     else:
-        await reject(conflict)
+        await reject(conflict, query=query, ci=ci)
 
 
 def main() -> None:
@@ -144,8 +187,14 @@ def main() -> None:
     c.add_argument("--reason", default="intentional change, rationale updated")
     r = sub.add_parser("reject")
     r.add_argument("id", nargs="?", default=None)
+    for p in (c, r):
+        p.add_argument("--query", default=None,
+                       help="override the proof recall query (demo uses the contrastive form)")
+        p.add_argument("--ci", action="store_true",
+                       help="post the after-recall result as a PR comment (CI mode)")
     args = ap.parse_args()
-    asyncio.run(_run(args.action, args.id, getattr(args, "reason", "")))
+    asyncio.run(_run(args.action, args.id, getattr(args, "reason", ""),
+                     getattr(args, "query", None), getattr(args, "ci", False)))
 
 
 if __name__ == "__main__":

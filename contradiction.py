@@ -80,11 +80,16 @@ def _entry_text(entry: dict) -> str:
             f"Source commit: {(entry.get('sha') or '')[:8]}")
 
 
-async def detect(repo_path: str, *, branch: str | None, head: str | None) -> dict:
+async def detect(repo_path: str, *, branch: str | None, head: str | None,
+                 base: str | None = None, post_comment: bool = True) -> dict:
     check_keys(need_cognee=True, need_llm=True)
     await cognee_client.connect()
 
-    if head:
+    if base and head:
+        # PR range: explicit base..head SHAs (CI passes github.event.pull_request.base/head).
+        diff, touched = diff_of_branch(repo_path, base=base, head=head)
+        sha = head
+    elif head:
         diff, touched = diff_of_commit(repo_path, head)
         sha = head
     else:
@@ -132,7 +137,7 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None) -> dic
     if verdict["conflict"]:
         # post_or_print is sync; import here to avoid module-level requests import cost
         import github
-        github.post_or_print(verdict, sha=sha)
+        github.post_or_print(verdict, sha=sha, post_comment=post_comment)
 
     await cognee_client.disconnect()
     return verdict
@@ -143,11 +148,17 @@ def main() -> None:
     ap.add_argument("--repo", default=str(DEMO_REPO))
     ap.add_argument("--branch", default=None)
     ap.add_argument("--head", default=None)
+    ap.add_argument("--base", default=None,
+                    help="base SHA for a PR-range diff (CI); paired with --head")
+    ap.add_argument("--no-post", action="store_true",
+                    help="write pending_conflict.json but skip the PR comment "
+                         "(used by the reconcile workflow's re-derive step)")
     args = ap.parse_args()
     if not args.branch and not args.head:
-        sys.exit("Provide --branch <name> or --head <sha>")
+        sys.exit("Provide --branch <name> or --head <sha> (or --base + --head for a PR range)")
     repo = args.repo if os.path.isabs(args.repo) else os.path.join(os.getcwd(), args.repo)
-    asyncio.run(detect(repo, branch=args.branch, head=args.head))
+    asyncio.run(detect(repo, branch=args.branch, head=args.head,
+                       base=args.base, post_comment=not args.no_post))
 
 
 if __name__ == "__main__":

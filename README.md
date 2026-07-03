@@ -174,6 +174,7 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 4. `python reconcile.py confirm` → `event_log.json` gains remember+forget+improve; the contrastive recall now returns the **updated** belief ("yes, superseded"), different from step 2. (Proof the loop closed.)
 5. `python reconcile.py reject` → registry unchanged; recall answer unchanged. (Bug-caught branch verified.)
 6. `bash scripts/run_demo.sh` → full walkthrough runs clean.
+7. **CI (every PR):** push the repo (with committed `memory_registry.json` + `.github/workflows/`) to GitHub, add the Cognee/Ollama secrets, open a PR with the Redis→Map change → `github-actions[bot]` posts the CodeMind conflict comment citing the cache decision; push another commit → **no duplicate** (idempotency); reply `/codemind confirm intentional, single-instance deploy` → after-recall comment shows the answer flipped ("superseded as of the update"); open a second PR with a different change → a fresh comment on that PR's number (proves it works on **all** PRs).
 
 ---
 
@@ -186,3 +187,48 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 
 ## Cut list (if behind, in order)
 dashboard → real GitHub PR comments (fall back to terminal) → second demo scenario → anything beyond the one scripted contradiction. **Never cut the reconciliation loop — it's the thesis.**
+
+---
+
+## CI — runs on every PR (GitHub Actions)
+
+The terminal demo is one thing; the real product runs in CI on **every pull request**,
+not a hardcoded PR number. Two workflows live in `.github/workflows/`:
+
+- **`codemind-pr.yml`** — triggers on `pull_request` (opened / synchronize / reopened).
+  Checks out the PR head, recalls relevant past decisions from the Cognee Cloud graph,
+  judges whether the diff contradicts any of them, and posts a real PR comment when it
+  does. Idempotent per head SHA (pushing another commit to the same PR does *not* spam a
+  duplicate).
+- **`codemind-reconcile.yml`** — triggers on an `issue_comment` starting with
+  `/codemind `. Re-derives the conflict from the PR diff (no duplicate comment), runs the
+  reconcile loop, and posts the **after-recall** result as a new PR comment — the
+  loop-closing beat, automated.
+
+```
+PR opened ── codemind-pr.yml ──▶ contradiction.py ──▶ PR comment (⚠️ conflict) ──▶ author/maintainer replies
+                                                                                  │
+                                /codemind confirm <reason>   OR   /codemind reject
+                                                                                  ▼
+                       codemind-reconcile.yml ──▶ reconcile.py confirm|reject --ci ──▶ PR comment (✅/⛔ after-recall)
+```
+
+### Required repo secrets (Settings → Secrets → Actions)
+`COGNEE_URL`, `COGNEE_API_KEY`, `COGNEE_TENANT_ID`, `COGNEE_USER_ID`, `OLLAMA_API_KEY`
+(and optional `COGNEE_DATASET`, `OLLAMA_MODEL` to override defaults). `GITHUB_TOKEN` is
+auto-provided by Actions and posts comments as `github-actions[bot]`. To post under a
+human identity instead, add a `GH_PAT` secret (classic PAT with `repo` scope, or
+fine-grained with *Issues: write* + *Pull requests: write*). Both paths use the same
+workflow — `GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}`.
+
+### Memory convention
+Run `bash scripts/setup.sh` (or `ingest.py`) once locally to build the Cloud graph, then
+**commit `memory_registry.json`** to the repo so CI has the local decision manifest for
+the path-scope + keyword retrieval signals. If the registry is absent, detection
+gracefully degrades to semantic-recall-only (no crash). Re-running ingest later refreshes
+the graph; the committed registry keeps the local signals in sync.
+
+### Commands (reply to the CodeMind conflict comment)
+- `/codemind confirm <reason>` — the change is intentional: old belief crossed out
+  (`forget`), `UPDATE` remembered, `improve()` re-weights, after-recall posted.
+- `/codemind reject` — the change is a bug: memory unchanged, old belief reaffirmed.
