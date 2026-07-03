@@ -17,7 +17,9 @@ on:
     types: [created]
 
 permissions:
-  pull-requests: write
+  pull-requests: write   # post the after-recall comment
+  statuses: write          # flip the commit status failure → success (confirm) / keep red (reject)
+  issues: write             # open a regression issue on reject
   contents: read
 
 jobs:
