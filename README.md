@@ -134,7 +134,8 @@ cp .env.example .env
 ### 3. Prep the demo (once, before the camera rolls)
 ```bash
 bash scripts/setup.sh
-# rebuilds demo_repo, ingests 4 decisions into Cognee, confirms recall returns D1
+# rebuilds demo_repo, ingests 4 decisions into Cognee, confirms the 'before' recall
+# returns the clean answer ("no, must use Redis"). Re-runnable.
 ```
 
 ---
@@ -148,16 +149,16 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 | Time | Beat |
 |---|---|
 | 0:00–0:20 | The problem: teams lose why-code-is-the-way-it-is. CodeMind gives the repo a memory that argues back. |
-| 0:20–0:40 | Show the seeded graph; `recall("why do we use apiClient")` → the **old** answer (remember it). |
-| 0:40–1:10 | Live commit: a teammate swaps `apiClient` back to raw `fetch()`. `contradiction.py` fires and posts the conflict citing the Jan-14 decision. |
-| 1:10–1:30 | `reconcile confirm` → `remember` the UPDATE, `forget` the old belief (surgical), `improve` re-weights. Old belief visibly crossed out. |
-| 1:30–1:50 | `recall("why do we use apiClient")` again → the answer has **changed**. The delta vs. 0:20 is the loop closing. |
+| 0:20–0:40 | Show the seeded graph; `recall("can I use an in-memory Map cache instead of Redis?")` → the **old** answer ("no, must use Redis — Mar 2 stale-config incident"). Remember it. |
+| 0:40–1:10 | Live commit: a teammate replaces Redis with a per-process in-memory `Map`. `contradiction.py` fires and posts the conflict citing the cache decision. |
+| 1:10–1:30 | `reconcile confirm` → `remember` the UPDATE, `forget` the old belief (surgical, by `data_id`), `improve` re-weights. Old belief visibly crossed out. |
+| 1:30–1:50 | `recall("can I use an in-memory Map cache instead of Redis?")` again → the answer has **changed** ("yes, superseded as of the update"). The before/after flip is the loop closing. |
 | 1:50–2:00 | Close: memory that can be wrong, get challenged, and correct itself. |
 
 ### Manual control (for testing)
 ```bash
-.venv/bin/python contradiction.py --repo demo_repo --branch violation   # should flag D1
-.venv/bin/python contradiction.py --repo demo_repo --branch benign      # should stay quiet
+.venv/bin/python contradiction.py --repo demo_repo --branch violation   # should flag the Redis decision
+.venv/bin/python contradiction.py --repo demo_repo --branch benign      # should stay quiet (same-file refactor)
 .venv/bin/python reconcile.py confirm --reason "intentional, rationale updated"
 .venv/bin/python reconcile.py reject
 .venv/bin/python dashboard/build.py && open dashboard/index.html        # stretch visual
@@ -167,10 +168,10 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 
 ## Verification (end-to-end)
 
-1. `python spike.py` → remember 2, forget 1, 1 remains. (Phase 0 gate.)
-2. `python ingest.py --repo demo_repo --reset` → `memory_registry.json` has 4 entries each with a `data_id`; `recall("why do we use apiClient")` returns D1.
-3. `python contradiction.py --branch violation` → conflict citing D1; `--branch benign` → no conflict. **Both must hold.**
-4. `python reconcile.py confirm` → `event_log.json` gains remember+forget+improve; `recall("why do we use apiClient")` now returns the **updated** belief, different from step 2. (Proof the loop closed.)
+1. `python spike.py` → remember 2, forget 1, 1 remains. (Phase 0 gate — surgical forget works.)
+2. `bash scripts/setup.sh` → rebuilds demo_repo, ingests 4 decisions; the pre-demo recall returns the clean **before** answer ("no, must use Redis"). Re-runnable: `--reset` surgically forgets every registry `data_id` (including any prior UPDATE) so the graph is clean each run.
+3. `python contradiction.py --branch violation` → conflict citing the Redis decision; `--branch benign` (a same-file `DEFAULT_TTL` refactor) → no conflict. **Both must hold.**
+4. `python reconcile.py confirm` → `event_log.json` gains remember+forget+improve; the contrastive recall now returns the **updated** belief ("yes, superseded"), different from step 2. (Proof the loop closed.)
 5. `python reconcile.py reject` → registry unchanged; recall answer unchanged. (Bug-caught branch verified.)
 6. `bash scripts/run_demo.sh` → full walkthrough runs clean.
 
@@ -178,7 +179,7 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 
 ## Tech stack
 - **Memory:** Cognee Cloud (shared graph across contributors/CI — the whole point)
-- **LLM (extraction + judgment):** Ollama Cloud via its OpenAI-compatible endpoint (`https://ollama.com/v1`, Bearer key; e.g. `qwen2.5:7b-instruct`). Cognee Cloud runs its own LLM for graph ingestion server-side, so the two are independent.
+- **LLM (extraction + judgment):** Ollama Cloud via its OpenAI-compatible endpoint (`https://ollama.com/v1`, Bearer key; e.g. `gpt-oss:120b`). Cognee Cloud runs its own LLM for graph ingestion server-side, so the two are independent.
 - **Ingestion:** Python + git CLI reading `git log -p` and branch diffs
 - **Integration:** GitHub PR comments via GitHub API (env-gated; terminal fallback by default)
 - **Dashboard:** static HTML generated from local state (stretch)
