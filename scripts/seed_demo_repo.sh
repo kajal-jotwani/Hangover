@@ -95,33 +95,36 @@ git commit -q -m "Add userService using apiClient" -m "userService fetches users
 git branch -M main
 
 # --------------------------------------------------------------------------
-# violation branch — planted contradiction (D1): direct fetch()
+# violation branch — planted contradiction (D2): in-memory Map cache
 # --------------------------------------------------------------------------
 git checkout -q -b violation
-cat > src/services/userService.ts <<'TS'
-export async function getUser(id: string) {
-  // direct fetch — faster, no wrapper overhead
-  const res = await fetch(`/users/${id}`);
-  return res.json();
-}
+cat > src/lib/cache.ts <<'TS'
+// Drop the Redis dependency — a per-process Map is simpler and faster.
+const mem = new Map<string, string>();
+export async function cacheGet(key: string) { return mem.get(key) ?? null; }
+export async function cacheSet(key: string, val: string, ttl = 300) { mem.set(key, val); }
 TS
 git add -A
-git commit -q -m "Inline fetch in userService for speed" -m "Skip the apiClient wrapper in userService and call fetch() directly to reduce overhead."
+git commit -q -m "Replace Redis cache with in-memory Map for speed" -m "Drop the Redis dependency in src/lib/cache.ts and use a per-process in-memory Map cache instead — simpler, no network hop, lower latency."
 
 # --------------------------------------------------------------------------
-# benign branch — control: a typo fix that violates NO decision
+# benign branch — control: a non-violating change to the SAME file
 # --------------------------------------------------------------------------
 git checkout -q main
 git checkout -q -b benign
-cat > src/services/userService.ts <<'TS'
-import { apiClient } from "../lib/apiClient";
-export async function getUser(id: string) {
-  // fetch a user by id
-  return apiClient(`/users/${id}`);
-}
+cat > src/lib/cache.ts <<'TS'
+import { createClient } from "redis";
+const redis = createClient({ url: process.env.REDIS_URL });
+redis.on("error", (e) => console.error("redis", e));
+// Cache layer is Redis. Do NOT reintroduce in-memory Maps for caching —
+// multiple instances made stale data in the Mar 2 incident.
+/** Default TTL in seconds for cache entries. */
+const DEFAULT_TTL = 300;
+export async function cacheGet(key: string) { return redis.get(key); }
+export async function cacheSet(key: string, val: string, ttl = DEFAULT_TTL) { await redis.set(key, val, { EX: ttl }); }
 TS
 git add -A
-git commit -q -m "Fix typo in userService comment" -m "Corrected a comment typo. No behavior change."
+git commit -q -m "Extract DEFAULT_TTL constant in cache.ts" -m "Refactor: pull the magic 300 into a named DEFAULT_TTL constant. No behavior change — still Redis-backed."
 
 git checkout -q main
 echo "Seeded demo_repo at $REPO"

@@ -95,9 +95,11 @@ async def confirm(conflict: dict, *, reason: str) -> None:
     console.print(Panel.fit("Belief updated. Old memory forgotten, new one remembered, graph re-weighted.",
                             title="confirm", style="green"))
 
-    # The proof moment: re-query and show it now reflects the update.
-    console.print("\n[bold]PROOF — recall('why do we use apiClient') after reconciliation:[/bold]")
-    answers = await cognee_client.recall_decisions("why do we use apiClient for HTTP calls")
+    # The proof moment: re-query with a CONTRASTIVE query so the delta is legible.
+    # Before: 'no, must use Redis'; after: 'yes, in-memory Map permitted as of
+    # the update'. That before/after flip is the demo's spine.
+    console.print("\n[bold]PROOF — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
+    answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
     for a in answers:
         console.print(f"  - {a[:240]}")
     await cognee_client.disconnect()
@@ -110,8 +112,8 @@ async def reject(conflict: dict) -> None:
     console.print(f"The old belief stands: [cyan]{conflict.get('decision_violated','')[:120]}[/cyan]")
     registry.append_event("reject", decision_violated=conflict.get("decision_violated", ""),
                           note="change rejected as a bug; memory unchanged")
-    console.print("\n[bold]Memory unchanged — recall('why do we use apiClient'):[/bold]")
-    answers = await cognee_client.recall_decisions("why do we use apiClient for HTTP calls")
+    console.print("\n[bold]Memory unchanged — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
+    answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
     for a in answers:
         console.print(f"  - {a[:240]}")
     await cognee_client.disconnect()

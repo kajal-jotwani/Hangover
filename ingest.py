@@ -92,11 +92,11 @@ async def ingest(repo_path: str, *, reset: bool) -> None:
         style="green",
     ))
 
-    # Checkpoint: recall the apiClient decision
-    console.print("\n[bold]Checkpoint — recall('why do we use apiClient'):[/bold]")
-    answers = await cognee_client.recall_decisions("why do we use apiClient for HTTP calls")
+    # Checkpoint: contrastive recall — the 'before' answer the demo compares against
+    console.print("\n[bold]Checkpoint — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
+    answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
     for a in answers:
-        console.print(f"  - {a[:200]}")
+        console.print(f"  - {a[:220]}")
 
     await cognee_client.disconnect()
 
