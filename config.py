@@ -50,7 +50,11 @@ def check_keys(*, need_cognee: bool = True, need_llm: bool = False) -> None:
     if need_llm and not OLLAMA_API_KEY:
         missing.append("OLLAMA_API_KEY (Ollama Cloud key)")
     if missing:
-        raise SystemExit(
-            "Missing env vars: " + ", ".join(missing) + ". "
-            "Fill them in ~/desktop/codemind/.env (see .env.example)."
-        )
+        # In GitHub Actions the creds come from repo secrets, not a local .env.
+        in_ci = os.getenv("GITHUB_ACTIONS") == "true" or os.getenv("CI") == "true"
+        if in_ci:
+            hint = ("Add these as repo secrets (Settings → Secrets → Actions), "
+                    "then re-run the failed job.")
+        else:
+            hint = "Fill them in ~/desktop/codemind/.env (see .env.example)."
+        raise SystemExit("Missing env vars: " + ", ".join(missing) + ". " + hint)
