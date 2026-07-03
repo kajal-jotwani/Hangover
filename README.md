@@ -44,16 +44,33 @@ it's remembering the **decisions** — and noticing when new code violates them.
 
 ## 🧠 Cognee operations callout (for "Best Use of Cognee" judges)
 
-All four lifecycle verbs are used **meaningfully and live**, not just `remember`+`recall`:
+All four lifecycle verbs are used **meaningfully and live**, plus the deeper
+`cognee.search` graph-node retrieval, and the GitHub commit-status + issue
+integrations:
 
-- **`cognee.serve(url, api_key)`** — routes every op to the shared Cloud tenant (`config.py`).
-- **`cognee.remember(text, dataset_name, importance_weight, self_improvement=True)`** — each extracted decision is stored with an importance score; `self_improvement` auto-runs `improve` (`cognee_client.remember_decision`, called from `ingest.py` and `reconcile.py`).
-- **`cognee.recall(query_text, datasets, top_k, auto_route)`** — semantic retrieval over the graph (`cognee_client.recall_decisions`, called from `contradiction.py`).
-- **`cognee.forget(data_id, dataset)`** — **surgical single-memory deletion** by `data_id` (confirmed working against the v1.2 SDK). This is what makes "old belief crossed out" honest rather than faked (`cognee_client.forget_one`, called from `reconcile.py confirm`).
-- **`cognee.improve(dataset_name)`** — explicit re-weight after an update (`cognee_client.improve_graph`, called from `reconcile.py confirm`).
+- **`cognee.serve(url, api_key)`** — routes every op to the shared Cloud tenant (`config.py`); tenant/user headers patched into the session (`cognee_client._inject_headers`).
+- **`cognee.remember(text, dataset_name, importance_weight, self_improvement=True)`** — each extracted decision is stored with an importance score; `self_improvement` auto-runs `improve` (`cognee_client.remember_decision`, called from `ingest.py` and `reconcile.py`). The new item's `data_id` is isolated by **diffing the items list before/after** (the list isn't in insertion order).
+- **`cognee.recall(query_text, datasets, top_k, auto_route)`** — semantic retrieval over the graph (`cognee_client.recall_decisions`).
+- **`cognee.search(query_text, datasets, only_context=True, feedback_influence=…, neighborhood_depth=…, include_references=True)`** — pulls the **actual graph nodes** (Decision + Rationale + keyword tags), deeper than `recall`'s LLM answer. Used in `contradiction.py` to cite the specific node a diff contradicts, and in the dashboard to render the live graph (`cognee_client.search_graph_nodes`). `feedback_influence` is wired so the reconcile `confirm`/`reject` signal can shape future retrieval.
+- **`cognee.forget(data_id, dataset)`** — **surgical single-memory deletion** by `data_id` (confirmed working on cloud). This is what makes "old belief crossed out" honest rather than faked (`cognee_client.forget_one` / `forget_many`).
+- **`cognee.improve(dataset_name)`** — explicit re-weight after an update (`cognee_client.improve_graph`, best-effort — see note below). Auto-runs via `remember(self_improvement=True)`.
+
+> **Honest caveat:** `cognee.memify()` and `cognee.visualize()` are blocked on
+> this cloud tenant — `memify` 404s (`Empty graph projected`) + 422 (`LLM API key
+> not set`), and `visualize`/`datasets.list_datasets` crash on a broken local-SQLite
+> path in cloud mode. So `improve` stays best-effort and the dashboard renders the
+> live graph from `cognee.search(only_context=True)` nodes instead of `visualize()`.
+> Every Cognee API the tenant *does* support is leaned on; the ones it blocks are
+> documented rather than faked.
+
+### Integrations (the rules: "and integrations")
+- **GitHub PR comments** — the conflict posts as a real comment citing the violated decision + Cognee graph evidence (`github.post_or_print`).
+- **GitHub commit-status check** — the conflict also lights up the PR check summary as a **failure**; `reconcile confirm` flips it to **success** (`github.post_commit_status`).
+- **GitHub issue on reject** — `reconcile reject` auto-opens an issue tracking the caught regression, labeled `codemind` + `regression` (`github.create_issue`).
+- **CI on every PR** — two GitHub Actions workflows (`.github/workflows/`) run detection + the comment-triggered reconcile loop (see "CI — runs on every PR" below).
 
 The reconciliation moment — `remember` the update → `forget` the old belief → `improve`
-re-weights → re-`recall` shows the changed answer — is the entire thesis, and it runs live.
+re-weights → re-`recall`/`search` shows the changed answer — is the entire thesis, and it runs live.
 
 ---
 
@@ -108,7 +125,8 @@ timeline (feeds the dashboard).
 - `scripts/seed_demo_repo.sh` — builds demo_repo with 4 seeded decisions + violation/benign branches
 - `scripts/setup.sh` — one-time pre-demo prep (seed + ingest + recall check)
 - `scripts/run_demo.sh` — the scripted 2-minute walkthrough
-- `dashboard/build.py` — STRETCH: renders the memory graph + belief-changed timeline to HTML
+- `dashboard/build.py` — STRETCH: renders the memory graph + belief-changed timeline to HTML; pulls **live Cognee graph nodes** via `cognee.search(only_context=True)` and shows the Cognee lifecycle-API footprint
+- `scripts/spike_lifecycle.py` — live spike of the deeper Cognee APIs (`search`, `visualize`, `memify`, `datasets`) against the cloud tenant; documents which work vs. are blocked
 
 ---
 
