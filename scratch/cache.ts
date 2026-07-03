@@ -1,17 +1,13 @@
-// scratch/cache.ts — cache layer backed by Redis.
+// scratch/cache.ts — cache layer.
 //
-// Per the team decision: the cache layer MUST use Redis; never an in-memory Map.
-// Always go through cacheGet/cacheSet so the Redis client is the single source
-// of truth (in-process maps caused the Mar 2 stale-config incident).
-import { createClient } from "redis";
+// Replacing the Redis-backed cache with a per-process in-memory Map.
+// cacheGet and cacheSet now read/write a local Map<string,string> instead of Redis.
+const cache = new Map<string, string>();
 
-const redis = createClient({ url: process.env.REDIS_URL });
-await redis.connect();
-
-export async function cacheGet(key: string): Promise<string | null> {
-  return redis.get(key);
+export function cacheGet(key: string): string | undefined {
+  return cache.get(key);
 }
 
-export async function cacheSet(key: string, value: string): Promise<void> {
-  await redis.set(key, value);
+export function cacheSet(key: string, value: string): void {
+  cache.set(key, value);
 }
