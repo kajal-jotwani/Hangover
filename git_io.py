@@ -31,6 +31,21 @@ def log_commits(repo_path: str, *, max_count: int = 100) -> list[Commit]:
     return _parse_log(raw)
 
 
+def log_commits_range(repo_path: str, base: str, head: str) -> list[Commit]:
+    """Walk the commit range base..head with patches. Returns oldest-first.
+
+    Used by the auto-ingest-on-merge workflow: CI passes the push's `before`
+    SHA as base and `after` SHA as head, so only the newly-merged commits are
+    walked and remembered — incremental, no re-ingesting of history.
+    """
+    raw = _run(
+        ["log", f"{base}..{head}",
+         "--pretty=CommitStart%n%H%n%s%n%b%nCommitEnd", "-p"],
+        repo_path,
+    )
+    return _parse_log(raw)
+
+
 def _parse_log(raw: str) -> list[Commit]:
     commits: list[Commit] = []
     blocks = raw.split("CommitStart\n")
