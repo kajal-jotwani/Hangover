@@ -111,9 +111,17 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
     for r in recalled:
         console.print(f"  - {r[:80]}")
 
+    # graph node retrieval — cognee.search(only_context=True) returns the actual
+    # graph NODES (Decision + Rationale + keyword tags), deeper than recall's
+    # LLM answer. Cited in the PR comment as "graph evidence" and fed to the judge.
+    graph_nodes = await cognee_client.search_graph_nodes(query[:500], top_k=10)
+    console.print(f"[blue]graph nodes:[/blue] {len(graph_nodes)} node(s)")
+    for n in graph_nodes[:3]:
+        console.print(f"  - {n[:80]}")
+
     candidates = list(local)
     seen = {c.lower()[:120] for c in candidates}
-    for r in recalled:
+    for r in recalled + graph_nodes:
         k = r.lower()[:120]
         if k and k not in seen:
             seen.add(k)
@@ -126,6 +134,8 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
 
     console.print(f"\n[bold]Judging {len(candidates)} candidate(s) against the diff...[/bold]")
     verdict = judge_contradiction(diff, candidates)
+    # Attach the graph nodes that informed the verdict so the PR comment can cite them.
+    verdict["graph_nodes"] = graph_nodes
     console.print(Panel.fit(
         f"conflict: {verdict['conflict']}\n"
         f"decision_violated: {verdict['decision_violated'][:100]}\n"

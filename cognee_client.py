@@ -245,6 +245,52 @@ def _recall_text(r) -> str | None:
     return None
 
 
+async def search_graph_nodes(query: str, *, top_k: int = 10,
+                              feedback_influence: float = 0.0) -> list[str]:
+    """Pull the actual Cognee graph NODES that match the query (not an LLM answer).
+
+    Uses cognee.search(only_context=True) — the deepest retrieval Cognee exposes
+    on the cloud tenant (recall() is a thin wrapper around the same engine; this
+    returns the raw graph nodes with their content + keyword tags). Used to cite
+    *which* past decision node a diff contradicts, and to feed the judge richer
+    candidates than the recall answer alone.
+
+    feedback_influence (0.0–1.0) weights retrieval by previously-stored human
+    feedback — the confirm/reject signal. On this tenant memify()/improve()
+    don't persist feedback, so the knob is wired but its effect is limited; it's
+    exposed so the reconcile 'proof' search can lean on it once the backend supports it.
+
+    Returns a list of node-content strings (parsed out of the search_result blob).
+    """
+    try:
+        results = await cognee.search(
+            query_text=query, datasets=[DATASET_NAME], top_k=top_k,
+            only_context=True, feedback_influence=feedback_influence,
+        )
+    except Exception:
+        return []
+    nodes: list[str] = []
+    for r in results or []:
+        blob = _recall_text(r) if not isinstance(r, dict) else None
+        if blob is None and isinstance(r, dict):
+            blob = r.get("search_result") or _recall_text(r) or json.dumps(_to_serializable(r))
+        if not blob:
+            continue
+        # The blob looks like:
+        #   "Nodes:\nNode: <preview> [kw, kw]\n__node_content_start__\n<full content>..."
+        # Pull each node's full content (between __node_content_start__ and the
+        # next "Node:" header / end).
+        parts = blob.split("__node_content_start__")
+        for chunk in parts[1:]:
+            content = chunk.split("\nNode:")[0].strip()
+            if content:
+                nodes.append(content)
+        if not nodes and blob.strip().lower().startswith("nodes:"):
+            # No content markers — keep the whole blob as one candidate.
+            nodes.append(blob.strip())
+    return nodes
+
+
 def _to_serializable(obj: Any) -> Any:
     if hasattr(obj, "model_dump"):
         return obj.model_dump()

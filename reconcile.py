@@ -110,6 +110,10 @@ async def confirm(conflict: dict, *, reason: str, query: str | None = None, ci: 
         console.print(f"  - {a[:240]}")
     if ci:
         _post_after_comment("confirm", conflict, reason, proof_query, answers)
+        # The conflict is resolved — flip the commit status from failure → success.
+        import github
+        github.post_commit_status(conflict.get("sha", ""),
+                                  "success", "Memory updated — old belief crossed out")
     await cognee_client.disconnect()
 
 
@@ -127,6 +131,23 @@ async def reject(conflict: dict, *, query: str | None = None, ci: bool = False) 
         console.print(f"  - {a[:240]}")
     if ci:
         _post_after_comment("reject", conflict, "", proof_query, answers)
+        # The bug branch: open a GitHub issue tracking the caught regression, and
+        # keep the commit status red so it blocks merge.
+        import github
+        dec = conflict.get("decision_violated", "").replace("\n", " ")[:200]
+        sha = conflict.get("sha", "")[:12]
+        github.create_issue(
+            f"CodeMind caught a likely regression: {dec[:90]}",
+            f"CodeMind flagged a PR change as contradicting a past decision and a "
+            f"maintainer rejected it as a bug.\n\n"
+            f"**Violated decision:** {dec}\n\n"
+            f"**Why CodeMind flagged it:** {conflict.get('explanation','')[:400]}\n\n"
+            f"**Source commit:** {sha}\n\n"
+            f"The old belief stands — the code change should be reverted or fixed.",
+            labels=["codemind", "regression"],
+        )
+        github.post_commit_status(conflict.get("sha", ""),
+                                   "failure", "Rejected as a bug — issue opened")
     await cognee_client.disconnect()
 
 
