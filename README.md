@@ -60,7 +60,13 @@ integrations:
 > not set`), and `visualize`/`datasets.list_datasets` crash on a broken local-SQLite
 > path in cloud mode. So `improve` stays best-effort and the dashboard renders the
 > live graph from `cognee.search(only_context=True)` nodes instead of `visualize()`.
-> Every Cognee API the tenant *does* support is leaned on; the ones it blocks are
+> The feedback-re-weight loop (`cognee.add_feedback` → `memify` applies the weights)
+> is likewise blocked on cloud: `add_feedback` isn't exposed on the cloud client and
+> the local session manager no-ops (returns `False`) in cloud mode; `recall` surfaces
+> no qa/session ids to feedback on. The "memory learns from human feedback" thesis
+> is instead embodied by the **confirm/reject** loop — `confirm` revises the belief
+> (`remember` UPDATE + surgical `forget` + `improve`), `reject` holds it. Every
+> Cognee API the tenant *does* support is leaned on; the ones it blocks are
 > documented rather than faked.
 
 ### Integrations (the rules: "and integrations")
