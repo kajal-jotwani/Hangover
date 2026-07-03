@@ -31,9 +31,130 @@ console = Console()
 
 _STOP = set("a an the and or to in of for on with is are be this that from by as it its our we do not no must go all".split())
 
+# Monorepo-scale retrieval bounds. Per PR we run one retrieval query per
+# SUBSYSTEM (top-2 path segments) touched — not one per file, and not one
+# PR-wide — so a 50-file PR across 8 packages becomes 8 focused queries
+# instead of a single alphabetically-truncated one. See detect() below.
+_MAX_GROUPS = 20        # cap distinct subsystems we'll query per PR
+_TOP_K_PER_GROUP = 5    # recall + graph nodes per subsystem query
+_MAX_CANDIDATES = 25    # total deduped candidates fed to the judge
+_MAX_GRAPH_NODES = 12  # nodes cited in the PR comment
+
 
 def _keywords(text: str) -> set[str]:
     return {w for w in re.findall(r"[A-Za-z_][A-Za-z0-9_./-]+", text.lower()) if w not in _STOP and len(w) > 3}
+
+
+def _file_group(path: str) -> str:
+    """Subsystem key for a file path = top-2 path segments (or top-1 if shallow).
+
+    services/payments/checkout.ts -> "services/payments"; cache.ts -> "cache".
+    This is the unit we run retrieval against, so a monorepo PR is queried per
+    touched subsystem rather than per file or PR-wide.
+    """
+    parts = path.split("/")
+    return "/".join(parts[:2]) if len(parts) >= 2 else (parts[0] or "root")
+
+
+def _split_diff_by_file(diff: str) -> dict[str, str]:
+    """Split a unified git diff into {file_path: that file's hunk text}.
+
+    Per-file hunks are the unit a past decision applies to; building retrieval
+    queries per subsystem-of-files (instead of one PR-wide) is what keeps
+    detection accurate on large monorepo PRs.
+    """
+    hunks: dict[str, str] = {}
+    cur_file: str | None = None
+    cur: list[str] = []
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            if cur_file is not None:
+                hunks[cur_file] = "\n".join(cur)
+            parts = line.split(" b/", 1)
+            cur_file = parts[1].strip() if len(parts) == 2 else None
+            cur = [line]
+        elif cur_file is not None:
+            cur.append(line)
+    if cur_file is not None:
+        hunks[cur_file] = "\n".join(cur)
+    return hunks
+
+
+def _group_hunks(file_hunks: dict[str, str]) -> dict[str, str]:
+    """Group per-file hunks by subsystem -> combined hunk text.
+
+    Bounds the number of retrieval queries to O(subsystems touched) rather than
+    O(files touched): a 200-file PR across 8 services issues 8 queries, not 200.
+    """
+    groups: dict[str, list[str]] = {}
+    for f, h in file_hunks.items():
+        groups.setdefault(_file_group(f), []).append(h)
+    return {k: "\n".join(vs) for k, vs in groups.items()}
+
+
+def _heaviest_groups(group_hunks: dict[str, str], cap: int = _MAX_GROUPS) -> list[str]:
+    """Subsystem keys with the most diff lines first, capped so a pathological
+    PR can't explode the cloud-call count."""
+    return [k for k, _ in sorted(group_hunks.items(),
+            key=lambda kv: len(kv[1].splitlines()), reverse=True)[:cap]]
+
+
+def _scope_matched_files(touched_files: list[str]) -> list[str]:
+    """Touched files that fall under an active registry decision's scope.
+
+    The deterministic path-scope signal — tells the focused-diff builder which
+    files to surface to the judge even when semantic recall is silent, so a
+    recall miss can't hide a decision that applies by path.
+    """
+    out: list[str] = []
+    for tf in touched_files:
+        tf_l = tf.lower()
+        for entry in registry.all_active():
+            scope = (entry.get("scope") or "").lower()
+            if not scope:
+                continue
+            toks = [t.strip() for t in scope.replace(",", " ").split() if t.strip()]
+            if any(tok in tf_l for tok in toks):
+                out.append(tf)
+                break
+    return out
+
+
+def _focused_diff(file_hunks: dict[str, str], relevant_files: list[str],
+                 cap: int = 8000) -> str:
+    """Concatenate per-file hunks with relevant files first, capped at `cap`.
+
+    The judge truncates to `cap` chars; ordering relevant files first means that
+    truncation keeps the decision-relevant hunks, not arbitrary
+    alphabetically-early ones — the same fix as the retrieval query, applied to
+    what the judge actually sees.
+    """
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for f in relevant_files:
+        h = file_hunks.get(f)
+        if h is not None and f not in seen:
+            ordered.append(h)
+            seen.add(f)
+    for f, h in file_hunks.items():
+        if f not in seen:
+            ordered.append(h)
+            seen.add(f)
+    return "\n".join(ordered)[:cap] if ordered else ""
+
+
+async def _recall_for_group(group: str, hunk: str) -> tuple[list[str], list[str]]:
+    """One focused retrieval query per subsystem: recall + graph nodes.
+
+    Query = keywords from this subsystem's hunks + the subsystem path, so the
+    query is scoped to the subsystem's vocabulary instead of the whole PR's
+    (which, on a big monorepo PR, would be an arbitrary 500-char slice of every
+    subsystem's keywords mashed together).
+    """
+    query = (" ".join(sorted(_keywords(hunk))) + " " + group)[:500]
+    recalled = await cognee_client.recall_decisions(query, top_k=_TOP_K_PER_GROUP)
+    nodes = await cognee_client.search_graph_nodes(query, top_k=_TOP_K_PER_GROUP)
+    return recalled, nodes
 
 
 def hybrid_retrieval(diff: str, touched_files: list[str]) -> list[str]:
@@ -96,29 +217,47 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         diff, touched = diff_of_branch(repo_path, base="main", head=branch or "HEAD")
         sha = branch or "HEAD"
 
-    console.print(f"[bold]Diff[/bold] from {sha}, touched: {touched}")
+    console.print(f"[bold]Diff[/bold] from {sha}, {len(touched)} file(s) touched")
 
-    # local signals first
+    # Per-file hunks + subsystem grouping — the unit a past decision applies to.
+    # Splitting retrieval by subsystem (not one PR-wide query) is what keeps
+    # detection accurate on large monorepo PRs: a 50-file PR across 8 packages
+    # becomes 8 focused queries instead of one alphabetically-truncated one.
+    file_hunks = _split_diff_by_file(diff)
+    group_hunks = _group_hunks(file_hunks)
+    groups = _heaviest_groups(group_hunks)
+    console.print(f"[blue]subsystems:[/blue] querying {len(groups)} group(s) "
+                  f"({len(file_hunks)} file(s) -> {len(group_hunks)} subsystems)")
+
+    # local signals first (path-scope + keyword overlap) — deterministic safety net
     local = hybrid_retrieval(diff, touched)
-    console.print(f"[blue]local signals:[/blue] {len(local)} candidate decision(s)")
+    scope_files = _scope_matched_files(touched)
+    console.print(f"[blue]local signals:[/blue] {len(local)} candidate(s) "
+                  f"({len(scope_files)} scope-matched file(s))")
     for d in local:
         console.print(f"  - {d.splitlines()[0][:80]}")
 
-    # semantic recall — query derived from the diff so 'fetch'/'apiClient' surface D1
-    query = " ".join(sorted(_keywords(diff))) + " " + " ".join(touched)
-    recalled = await cognee_client.recall_decisions(query[:500], top_k=10)
-    console.print(f"[blue]semantic recall:[/blue] {len(recalled)} result(s)")
-    for r in recalled:
-        console.print(f"  - {r[:80]}")
-
-    # graph node retrieval — cognee.search(only_context=True) returns the actual
-    # graph NODES (Decision + Rationale + keyword tags), deeper than recall's
-    # LLM answer. Cited in the PR comment as "graph evidence" and fed to the judge.
-    graph_nodes = await cognee_client.search_graph_nodes(query[:500], top_k=10)
+    # per-subsystem semantic + graph retrieval (bounded + concurrent). Each group
+    # gets its own focused query, so no subsystem's vocabulary is drowned out by
+    # another's — the core monorepo fix.
+    per_group = await asyncio.gather(*[_recall_for_group(g, group_hunks[g]) for g in groups])
+    recalled: list[str] = []
+    graph_nodes: list[str] = []
+    relevant_files: set[str] = set(scope_files)
+    file_to_group = {f: _file_group(f) for f in file_hunks}
+    for g, (rec, nodes) in zip(groups, per_group):
+        if rec or nodes:
+            # every file under a hit subsystem is decision-relevant for the focused diff
+            relevant_files.update(f for f, fg in file_to_group.items() if fg == g)
+        recalled.extend(rec)
+        graph_nodes.extend(nodes)
+    console.print(f"[blue]semantic recall:[/blue] {len(recalled)} result(s) "
+                  f"across {len(groups)} subsystem query(ies)")
     console.print(f"[blue]graph nodes:[/blue] {len(graph_nodes)} node(s)")
     for n in graph_nodes[:3]:
         console.print(f"  - {n[:80]}")
 
+    # union + de-dupe + cap (so a noisy large graph can't drown the judge)
     candidates = list(local)
     seen = {c.lower()[:120] for c in candidates}
     for r in recalled + graph_nodes:
@@ -126,6 +265,8 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         if k and k not in seen:
             seen.add(k)
             candidates.append(r)
+    candidates = candidates[:_MAX_CANDIDATES]
+    graph_nodes = graph_nodes[:_MAX_GRAPH_NODES]
 
     if not candidates:
         console.print("[yellow]No relevant memories found — nothing to contradict.[/yellow]")
@@ -135,8 +276,12 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         await cognee_client.disconnect()
         return {"conflict": False, "decision_violated": "", "explanation": "No relevant memories.", "confidence": 1.0}
 
-    console.print(f"\n[bold]Judging {len(candidates)} candidate(s) against the diff...[/bold]")
-    verdict = judge_contradiction(diff, candidates)
+    # focused diff: relevant files first so the judge's truncation keeps the
+    # decision-relevant hunks, not arbitrary alphabetically-early ones.
+    focused = _focused_diff(file_hunks, sorted(relevant_files)) or diff
+    console.print(f"\n[bold]Judging {len(candidates)} candidate(s) against "
+                  f"{len(relevant_files)} relevant file(s)...[/bold]")
+    verdict = judge_contradiction(focused, candidates)
     # Attach the graph nodes that informed the verdict so the PR comment can cite them.
     verdict["graph_nodes"] = graph_nodes
     console.print(Panel.fit(

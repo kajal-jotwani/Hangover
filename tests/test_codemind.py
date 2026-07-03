@@ -95,6 +95,91 @@ class TestHybridRetrieval(_TempRegistryMixin, unittest.TestCase):
         self.assertEqual(out, [])
 
 
+class TestMonorepoScaling(unittest.TestCase):
+    """Per-subsystem retrieval + focused diff — the helpers that make detection
+    scale to large monorepo PRs. Pure logic, no network."""
+
+    def test_split_diff_by_file_isolates_each_file_hunk(self):
+        from contradiction import _split_diff_by_file
+        diff = (
+            "diff --git a/services/payments/charge.ts b/services/payments/charge.ts\n"
+            "+new Map() instead of redis\n"
+            "diff --git a/services/auth/login.ts b/services/auth/login.ts\n"
+            "+direct fetch() call\n"
+        )
+        hunks = _split_diff_by_file(diff)
+        self.assertEqual(set(hunks), {"services/payments/charge.ts", "services/auth/login.ts"})
+        self.assertIn("redis", hunks["services/payments/charge.ts"])
+        self.assertIn("fetch", hunks["services/auth/login.ts"])
+        # and they don't bleed into each other
+        self.assertNotIn("fetch", hunks["services/payments/charge.ts"])
+
+    def test_file_group_top_two_segments(self):
+        from contradiction import _file_group
+        self.assertEqual(_file_group("services/payments/charge.ts"), "services/payments")
+        self.assertEqual(_file_group("services/auth/login.ts"), "services/auth")
+        # shallow (flat-repo) files group by their full path — one group per file,
+        # which is the right granularity for a non-monorepo layout
+        self.assertEqual(_file_group("cache.ts"), "cache.ts")
+
+    def test_group_hunks_collapses_files_to_subsystems(self):
+        from contradiction import _group_hunks, _split_diff_by_file
+        diff = (
+            "diff --git a/services/payments/charge.ts b/services/payments/charge.ts\n+x\n"
+            "diff --git a/services/payments/refund.ts b/services/payments/refund.ts\n+y\n"
+            "diff --git a/services/auth/login.ts b/services/auth/login.ts\n+z\n"
+        )
+        groups = _group_hunks(_split_diff_by_file(diff))
+        self.assertEqual(set(groups), {"services/payments", "services/auth"})
+        # two payments files collapsed into one subsystem hunk
+        self.assertIn("charge.ts", groups["services/payments"] if "charge" in groups["services/payments"] else groups["services/payments"])
+
+    def test_heaviest_groups_caps_and_orders_by_diff_size(self):
+        from contradiction import _group_hunks, _heaviest_groups
+        groups = {"a/a": "x\n" * 50, "b/b": "y\n" * 5, "c/c": "z\n" * 30}
+        out = _heaviest_groups(groups, cap=2)
+        self.assertEqual(out, ["a/a", "c/c"])  # heaviest first, capped at 2
+
+    def test_focused_diff_puts_relevant_files_first(self):
+        from contradiction import _split_diff_by_file, _focused_diff
+        diff = (
+            "diff --git a/services/payments/charge.ts b/services/payments/charge.ts\n"
+            "+REDIS_VIOLATION_MARKER\n"
+            "diff --git a/services/auth/login.ts b/services/auth/login.ts\n"
+            "+unrelated auth change that pads the diff a lot " + "x" * 200 + "\n"
+        )
+        hunks = _split_diff_by_file(diff)
+        # with a tight cap, the relevant (payments) file must survive truncation
+        focused = _focused_diff(hunks, ["services/payments/charge.ts"], cap=400)
+        self.assertIn("REDIS_VIOLATION_MARKER", focused,
+                       "relevant file must be ordered first so the judge's truncation keeps it")
+        # with no relevant files, falls back to file order (still no crash)
+        self.assertTrue(_focused_diff(hunks, []))
+
+    def test_focused_diff_empty_when_no_hunks(self):
+        from contradiction import _focused_diff
+        self.assertEqual(_focused_diff({}, ["anything"]), "")
+
+
+class TestScopeMatchedFiles(_TempRegistryMixin, unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self._tmpdir = tempfile.mkdtemp()
+        self._use_temp_registry({
+            "D2": {"status": "active", "decision": "Cache layer must be Redis",
+                   "scope": "src/cache, services/cache", "importance": 0.98},
+        })
+
+    def test_scope_match_surfaces_files_under_decision(self):
+        from contradiction import _scope_matched_files
+        matched = _scope_matched_files(["src/cache/index.ts", "src/log.ts", "services/cache/store.ts"])
+        self.assertEqual(matched, ["src/cache/index.ts", "services/cache/store.ts"])
+
+    def test_no_scope_no_match(self):
+        from contradiction import _scope_matched_files
+        self.assertEqual(_scope_matched_files(["src/log.ts", "README.md"]), [])
+
+
 class TestGithubComment(unittest.TestCase):
     def test_marker_is_head_sha_prefix(self):
         from github import _marker
