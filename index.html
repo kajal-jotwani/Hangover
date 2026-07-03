@@ -1,0 +1,69 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>CodeMind — Memory Graph</title>
+<style>
+  body{font-family:-apple-system,system-ui,sans-serif;background:#0b1020;color:#e5e7eb;margin:0;padding:24px}
+  h1{font-size:22px} h2{font-size:16px;color:#9ca3af;margin-top:28px;border-bottom:1px solid #1f2937;padding-bottom:6px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+  .card{background:#151c30;border:1px solid #243049;border-radius:10px;padding:14px;position:relative}
+  .card.super{opacity:.5} .card.super .dec{text-decoration:line-through;color:#9ca3af}
+  .imp{font-size:11px;color:#60a5fa;float:right}
+  .dec{font-weight:600;margin-bottom:6px} .rat{font-size:13px;color:#cbd5e1} .scope{font-size:11px;color:#64748b;margin-top:8px}
+  .ev{font-size:13px;padding:6px 0;border-bottom:1px solid #111827;display:flex;gap:10px;align-items:center}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+  .empty{color:#6b7280;font-style:italic}
+  .badge{display:inline-block;background:#1e293b;border:1px solid #334155;color:#60a5fa;
+         padding:3px 10px;border-radius:12px;font-size:12px;margin:2px;font-family:monospace}
+  .node{background:#0f172a;border-left:3px solid #a855f7;padding:8px 12px;margin:6px 0;
+        border-radius:4px;font-size:13px;white-space:pre-wrap;color:#d1d5db}
+</style></head><body>
+<h1>CodeMind — the repo that remembers</h1>
+<p style="color:#9ca3af">Shared memory graph on Cognee Cloud. Local snapshot from <code>memory_registry.json</code> + <code>event_log.json</code>, plus live graph nodes from <code>cognee.search</code>.</p>
+
+<h2>Cognee lifecycle footprint</h2>
+<div style="margin-bottom:8px"><span class="badge" title="remember() — extracts decision facts from each commit">remember</span> <span class="badge" title="recall() — retrieves relevant past decisions for a diff">recall</span> <span class="badge" title="search(only_context=True) — pulls the actual graph nodes">search</span> <span class="badge" title="forget(data_id) — surgically retires a single superseded memory">forget</span> <span class="badge" title="improve() / self_improvement — re-weights after a confirmed update">improve</span></div>
+
+<h2>Current beliefs (4 active, 0 superseded)</h2>
+<div class="grid"><div class="card active">
+          <div class="imp">importance 0.9</div>
+          <div class="dec">All network calls must use the apiClient wrapper instead of direct fetch() calls</div>
+          <div class="rat">Ensures retry logic and authentication headers are always applied, preventing outages caused by bypassing these mechanisms</div>
+          <div class="scope">scope: src/lib/apiClient.ts, all source files making HTTP requests (e.g., *.ts, *.js un</div>
+        </div><div class="card active">
+          <div class="imp">importance 0.98</div>
+          <div class="dec">Cache layer must be Redis; never use in-memory Map caches; always use cacheGet/cacheSet</div>
+          <div class="rat">In‑process caches cause stale data across multiple instances, which led to the Mar 2 stale‑config incident. Using Redis provides a single source of truth for all instances.</div>
+          <div class="scope">scope: src/lib/cache.ts, any code that accesses caching</div>
+        </div><div class="card active">
+          <div class="imp">importance 0.85</div>
+          <div class="dec">Do not simplify or refactor the LEGACY_LINE regex in src/utils/legacyRegex.ts</div>
+          <div class="rat"></div>
+          <div class="scope">scope: </div>
+        </div><div class="card active">
+          <div class="imp">importance 0.9</div>
+          <div class="dec">All logging must go through src/lib/logger.ts and never use console.log in application code</div>
+          <div class="rat"></div>
+          <div class="scope">scope: </div>
+        </div>
+</div>
+
+<h2>Live Cognee memory graph (16 nodes via cognee.search only_context)</h2>
+<div><div class="node">The decision mandates using Redis for caching and prohibiting in‑process Map caches.
+- On March 2, a stale‑config incident occurred because in‑process caches stored outdated data across multiple instances.
+- The cache layer must be Redis, never an in‑memory Map, and all code should use the cacheGet </div><div class="node">Decision: Cache layer must be Redis; never use in-memory Map caches; always use cacheGet/cacheSet
+Rationale: In‑process caches cause stale data across multiple instances, which led to the Mar 2 stale‑config incident. Using Redis provides a single source of truth for all instances.
+Scope: src/lib/cac</div><div class="node">Source file defining caching behavior.
+__node_content_end__</div><div class="node">In‑memory data store used as the required cache layer.
+__node_content_end__</div><div class="node">Function to store values in the cache.
+__node_content_end__</div><div class="node">Function to retrieve cached values.
+__node_content_end__</div><div class="node">None
+__node_content_end__</div><div class="node">Process‑local map used for caching, which is disallowed.
+__node_content_end__</div><div class="node">Scope includes src/lib/apiClient.ts and all source files making HTTP requests under src/
+__node_content_end__</div><div class="node">File containing the apiClient wrapper
+__node_content_end__</div><div class="node">file
+__node_content_end__</div><div class="node">function
+__node_content_end__</div></div>
+
+<h2>Belief-changed timeline (15 events)</h2>
+<div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D4-6f2ef5f1&quot;, &quot;sha&quot;: &quot;6f2ef5f1559217b5c5f5ede9cd843efc894731f2&quot;, &quot;decision&quot;: &quot;All logging must go through src/lib/logger.ts and never use conso</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D3-78840811&quot;, &quot;sha&quot;: &quot;78840811e20f40d308a64f0afaaa2f60a47f5f07&quot;, &quot;decision&quot;: &quot;Do not simplify or refactor the LEGACY_LINE regex in src/utils/le</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D2-7b3d4140&quot;, &quot;sha&quot;: &quot;7b3d4140b7d9196ff12640e8e0764867b044f80e&quot;, &quot;decision&quot;: &quot;Cache layer must be Redis; never use in-memory Map caches; always</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D1-27e8ca7b&quot;, &quot;sha&quot;: &quot;27e8ca7bfad79928ce4ec8ffdb7a56af1558d1e0&quot;, &quot;decision&quot;: &quot;All network calls must use the apiClient wrapper instead of direc</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D4-6e42680a&quot;, &quot;sha&quot;: &quot;6e42680a65b467098909a22b0de347e6eb433fc7&quot;, &quot;decision&quot;: &quot;All logging must use the shared structured logger (src/lib/logger</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D3-aea248d2&quot;, &quot;sha&quot;: &quot;aea248d28ab67163bc078eebf6ae51a3dde5714c&quot;, &quot;decision&quot;: &quot;Do not simplify or refactor the legacyRegex in src/utils/legacyRe</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D2-30a60991&quot;, &quot;sha&quot;: &quot;30a609914e3d13ede296d8d0f865a1dbd80db602&quot;, &quot;decision&quot;: &quot;Cache layer must use Redis; never use in-memory Map caches&quot;, &quot;dat</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D1-2bba358d&quot;, &quot;sha&quot;: &quot;2bba358dfbccfbd785c6035fed3c92d98696311c&quot;, &quot;decision&quot;: &quot;Use apiClient wrapper for all HTTP calls instead of direct fetch&quot;</div><div class="ev"><span class="dot" style="background:#a855f7"></span><b>improve</b> {&quot;note&quot;: &quot;re-weighted after update&quot;}</div><div class="ev"><span class="dot" style="background:#ef4444"></span><b>forget</b> {&quot;decision_id&quot;: &quot;D2-53752b51&quot;, &quot;data_id&quot;: &quot;71240d2e-920a-5b50-9ae5-854bfcc8f2ea&quot;, &quot;superseded_by&quot;: &quot;UPDATE-2026-07-03-c79a9b0e&quot;}</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;UPDATE-2026-07-03-c79a9b0e&quot;, &quot;decision&quot;: &quot;UPDATE as of 2026-07-03: Previous decision \&quot;Use Redis for the cache layer and never use in‑memory Ma</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D4-4fd6362c&quot;, &quot;sha&quot;: &quot;4fd6362c58b6d5fef93a4946b5f3cd0af6e7b3d9&quot;, &quot;decision&quot;: &quot;All logging must use src/lib/logger.ts (structured JSON via pino)</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D3-4da6188f&quot;, &quot;sha&quot;: &quot;4da6188f56bf9ee73e7f6c5af3849019536b5206&quot;, &quot;decision&quot;: &quot;Do not simplify or refactor the legacy regex in src/utils/legacyR</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D2-53752b51&quot;, &quot;sha&quot;: &quot;53752b51c1f157f41890c72ef21e7354ab71e30f&quot;, &quot;decision&quot;: &quot;Use Redis for the cache layer and never use in‑memory Map caches&quot;</div><div class="ev"><span class="dot" style="background:#3b82f6"></span><b>remember</b> {&quot;decision_id&quot;: &quot;D1-72b16a8d&quot;, &quot;sha&quot;: &quot;72b16a8dcf2d779b19c9caac7f04198a5fc1cb4f&quot;, &quot;decision&quot;: &quot;All network calls must use the apiClient wrapper; never call fetc</div></div>
+
+</body></html>
