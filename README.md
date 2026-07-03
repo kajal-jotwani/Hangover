@@ -71,9 +71,35 @@ integrations:
 
 ### Integrations (the rules: "and integrations")
 - **GitHub PR comments** — the conflict posts as a real comment citing the violated decision + Cognee graph evidence (`github.post_or_print`).
-- **GitHub commit-status check** — the conflict also lights up the PR check summary as a **failure**; `reconcile confirm` flips it to **success** (`github.post_commit_status`).
+- **GitHub commit-status check** — green on clean PRs, **red** on conflict (lights up the PR check summary); `reconcile confirm` flips red → green, `reject` keeps it red (`github.post_commit_status`). Usable as a **required** status check so a contradictory PR can't merge.
 - **GitHub issue on reject** — `reconcile reject` auto-opens an issue tracking the caught regression, labeled `codemind` + `regression` (`github.create_issue`).
 - **CI on every PR** — two GitHub Actions workflows (`.github/workflows/`) run detection + the comment-triggered reconcile loop (see "CI — runs on every PR" below).
+- **Auto-ingest on merge** — a third workflow (`codemind-ingest.yml`, opt-in via `vars.CODEMIND_AUTO_INGEST=true`) runs `ingest.py --since $before --head $after` on every push to `main`, so the graph grows itself with the team's merged history — "no action needed, just learning."
+
+## 🌐 Cross-repo shared memory (the Cloud-native differentiator)
+
+The Cognee Cloud graph is **tenant-global**: a decision remembered in repo A is
+retrievable from repo B's CI run. That's not a caveat here — it's the headline.
+It's the whole reason Cloud (not self-hosted) matters: **one memory graph across
+your whole org's repos**. A hard-won decision made in the payments repo protects a
+PR in the checkout repo. No local/self-hosted memory can do this.
+
+**Already proven live:** PR #6 ran with `local signals: 0` (no committed
+`memory_registry.json` on that branch) and the shared Cloud graph still surfaced
+**12 graph nodes** + the correct verdict via `cognee.search(only_context=True)` —
+i.e. the run's only memory was the graph populated by other repos' ingests. The
+dashboard pulls **16 live nodes** from the same shared graph.
+
+**Full two-repo theatrical demo** (a second repo wired to the same tenant catches a
+Redis→Map PR citing a decision remembered in repo A):
+```bash
+gh repo create <you>/codemind-cross-b --private        # you create repo B (one step)
+bash scripts/setup_cross_repo.sh <you>/codemind-cross-b # pushes code, sets secrets, opens the violation PR
+```
+The script gives repo B NO `memory_registry.json`, so its only memory is the shared
+Cloud graph. Within ~2 min the CodeMind bot comments on repo B's PR citing
+*"Cache layer must be Redis"* — a decision remembered in repo A — and a red
+`CodeMind / memory` check appears. That's org-wide shared memory, live.
 
 The reconciliation moment — `remember` the update → `forget` the old belief → `improve`
 re-weights → re-`recall`/`search` shows the changed answer — is the entire thesis, and it runs live.
