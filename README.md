@@ -75,7 +75,7 @@ demo_repo (git)  ──▶  ingest.py  ──▶  cognee.remember()  ──▶  
                                                                        │ recall()
                                                                        ▼
 new diff  ──▶  contradiction.py  ──▶  hybrid retrieval  ──▶  LLM judge  ──▶  conflict
-               (semantic recall +          (Ollama, local)          │
+               (semantic recall +          (Ollama Cloud)            │
                 path-scope + keyword                                  ▼
                 overlap unioned)                              github.post_or_print
                                                                  │
@@ -119,8 +119,9 @@ timeline (feeds the dashboard).
 cd codemind
 python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp .env.example .env
-# fill in: COGNEE_URL, COGNEE_API_KEY
-# local LLM: pull an Ollama model, e.g.  ollama pull qwen2.5:7b-instruct
+# Cognee Cloud:  COGNEE_URL (tenant API Base URL), COGNEE_API_KEY (X-Api-Key),
+#               COGNEE_TENANT_ID (X-Tenant-Id), COGNEE_USER_ID (X-User-Id)
+# Ollama Cloud: OLLAMA_API_KEY (https://ollama.com/settings/keys), OLLAMA_MODEL
 # (optional: GH_TOKEN, GH_REPO, GH_PR_NUMBER for real PR comments)
 ```
 
@@ -177,7 +178,7 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 
 ## Tech stack
 - **Memory:** Cognee Cloud (shared graph across contributors/CI — the whole point)
-- **LLM (extraction + judgment):** local Ollama model via its OpenAI-compatible endpoint (e.g. `qwen2.5:7b-instruct`) — keyless and offline. Cognee Cloud runs its own LLM for graph ingestion server-side, so the two are independent.
+- **LLM (extraction + judgment):** Ollama Cloud via its OpenAI-compatible endpoint (`https://ollama.com/v1`, Bearer key; e.g. `qwen2.5:7b-instruct`). Cognee Cloud runs its own LLM for graph ingestion server-side, so the two are independent.
 - **Ingestion:** Python + git CLI reading `git log -p` and branch diffs
 - **Integration:** GitHub PR comments via GitHub API (env-gated; terminal fallback by default)
 - **Dashboard:** static HTML generated from local state (stretch)

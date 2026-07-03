@@ -11,15 +11,21 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
 # --- Cognee Cloud ---
-COGNEE_URL = os.getenv("COGNEE_URL", "")
-COGNEE_API_KEY = os.getenv("COGNEE_API_KEY", "")
+# COGNEE_URL is the tenant API Base URL. COGNEE_API_KEY is sent as X-Api-Key.
+# COGNEE_TENANT_ID / COGNEE_USER_ID are injected as X-Tenant-Id / X-User-Id
+# headers (only if set) — the SDK only sends X-Api-Key by default, so we patch
+# the CloudClient session to add these when your tenant requires them.
+COGNEE_URL = os.getenv("COGNEE_URL", "").strip()
+COGNEE_API_KEY = os.getenv("COGNEE_API_KEY", "").strip()
+COGNEE_TENANT_ID = os.getenv("COGNEE_TENANT_ID", "").strip()
+COGNEE_USER_ID = os.getenv("COGNEE_USER_ID", "").strip()
 DATASET_NAME = os.getenv("COGNEE_DATASET", "codemind_repo_memory")
 
-# --- Ollama (local LLM for extraction + contradiction judgment) ---
-# Ollama exposes an OpenAI-compatible endpoint. The graph ingestion itself runs
-# on Cognee Cloud's own LLM server-side; these are only our custom reasoning calls.
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct")
+# --- Ollama Cloud (OpenAI-compatible) ---
+# Base URL https://ollama.com/v1 ; auth is Bearer OLLAMA_API_KEY (sent by the SDK).
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "https://ollama.com/v1").strip()
+OLLAMA_API_KEY = os.getenv("OLLAMA_API_KEY", "").strip()
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:7b-instruct").strip()
 
 # --- GitHub (optional PR comments) ---
 GH_TOKEN = os.getenv("GH_TOKEN", "").strip()
@@ -34,17 +40,17 @@ DEMO_REPO = ROOT / "demo_repo"
 
 
 def check_keys(*, need_cognee: bool = True, need_llm: bool = False) -> None:
-    """Fail fast with a clear message if required config is missing.
-
-    Cognee needs real Cloud credentials; the local LLM only needs a model name
-    (Ollama is keyless), but we confirm the server is reachable so failures are
-    obvious instead of a cryptic connection error mid-run.
-    """
+    """Fail fast with a clear message if required config is missing."""
     missing = []
-    if need_cognee and not COGNEE_API_KEY:
-        missing.append("COGNEE_API_KEY (and COGNEE_URL)")
+    if need_cognee:
+        if not COGNEE_API_KEY:
+            missing.append("COGNEE_API_KEY")
+        if not COGNEE_URL:
+            missing.append("COGNEE_URL (tenant API Base URL)")
+    if need_llm and not OLLAMA_API_KEY:
+        missing.append("OLLAMA_API_KEY (Ollama Cloud key)")
     if missing:
         raise SystemExit(
             "Missing env vars: " + ", ".join(missing) + ". "
-            "Copy .env.example to .env and fill them in."
+            "Fill them in ~/desktop/codemind/.env (see .env.example)."
         )

@@ -21,7 +21,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from config import OLLAMA_BASE_URL, OLLAMA_MODEL
+from config import OLLAMA_API_KEY, OLLAMA_BASE_URL, OLLAMA_MODEL
 
 _client: OpenAI | None = None
 
@@ -29,8 +29,11 @@ _client: OpenAI | None = None
 def _client_get() -> OpenAI:
     global _client
     if _client is None:
-        # api_key is required by the SDK signature but Ollama ignores it.
-        _client = OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+        if not OLLAMA_API_KEY:
+            raise SystemExit("OLLAMA_API_KEY not set in .env (Ollama Cloud key)")
+        # OpenAI SDK sends `Authorization: Bearer <key>` — which is what
+        # Ollama Cloud expects against its OpenAI-compatible endpoint.
+        _client = OpenAI(base_url=OLLAMA_BASE_URL, api_key=OLLAMA_API_KEY)
     return _client
 
 

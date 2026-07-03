@@ -20,14 +20,49 @@ from typing import Any
 
 import cognee
 
-from config import COGNEE_API_KEY, COGNEE_URL, DATASET_NAME
+from config import COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_URL, COGNEE_USER_ID, DATASET_NAME
+
+_cloud_client = None
 
 
 async def connect() -> None:
-    """Route all Cognee ops to the Cloud tenant."""
+    """Route all Cognee ops to the Cloud tenant.
+
+    cognee.serve() returns a CloudClient whose session only carries X-Api-Key.
+    If COGNEE_TENANT_ID / COGNEE_USER_ID are set, we patch the client's session
+    builder to also send X-Tenant-Id / X-User-Id (harmless if the server
+    ignores them, required if your tenant needs them).
+    """
+    global _cloud_client
     if not COGNEE_URL or not COGNEE_API_KEY:
         raise SystemExit("COGNEE_URL / COGNEE_API_KEY not set in .env")
-    await cognee.serve(url=COGNEE_URL, api_key=COGNEE_API_KEY)
+    _cloud_client = await cognee.serve(url=COGNEE_URL, api_key=COGNEE_API_KEY)
+    _inject_headers(_cloud_client)
+
+
+def _inject_headers(client) -> None:
+    """Patch CloudClient._get_session so the aiohttp session includes the
+    tenant/user headers alongside X-Api-Key."""
+    if not (COGNEE_TENANT_ID or COGNEE_USER_ID):
+        return
+    try:
+        import aiohttp
+    except ImportError:
+        return
+
+    async def _get_session_with_tenant():
+        if client._session is None or client._session.closed:
+            headers = {"X-Api-Key": client.api_key}
+            if COGNEE_TENANT_ID:
+                headers["X-Tenant-Id"] = COGNEE_TENANT_ID
+            if COGNEE_USER_ID:
+                headers["X-User-Id"] = COGNEE_USER_ID
+            client._session = aiohttp.ClientSession(
+                headers=headers, timeout=client.DEFAULT_TIMEOUT
+            )
+        return client._session
+
+    client._get_session = _get_session_with_tenant
 
 
 async def disconnect() -> None:
@@ -111,24 +146,30 @@ async def remember_decision(text: str, *, importance_weight: float | None = None
 
 
 async def recall_decisions(query: str, *, top_k: int = 15) -> list[str]:
-    """Return recalled decision texts. RecallResponse fields are attributes."""
+    """Return recalled decision texts.
+
+    In cloud mode (cognee.serve) recall() returns a list of dicts; in local
+    mode it returns Pydantic RecallResponse objects. Handle both.
+    """
     responses = await cognee.recall(
         query_text=query, datasets=[DATASET_NAME], top_k=top_k, auto_route=True
     )
     out: list[str] = []
     for r in responses or []:
-        # Pull the human-readable text from common attribute names.
-        text = None
-        for attr in ("answer", "text", "content", "response", "summary"):
-            v = getattr(r, attr, None)
-            if isinstance(v, str) and v.strip():
-                text = v
-                break
+        text = _recall_text(r)
         if text is None:
-            # Fallback: stringify
             text = json.dumps(_to_serializable(r))
         out.append(text)
     return out
+
+
+def _recall_text(r) -> str | None:
+    """Pull human-readable text from a recall result (dict or object)."""
+    for attr in ("answer", "text", "content", "response", "summary"):
+        v = r.get(attr) if isinstance(r, dict) else getattr(r, attr, None)
+        if isinstance(v, str) and v.strip():
+            return v
+    return None
 
 
 def _to_serializable(obj: Any) -> Any:
