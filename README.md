@@ -90,6 +90,12 @@ PR in the checkout repo. No local/self-hosted memory can do this.
 i.e. the run's only memory was the graph populated by other repos' ingests. The
 dashboard pulls **16 live nodes** from the same shared graph.
 
+**Proven locally too (read-only):** with the local registry blanked (simulating
+repo B's no-registry state), `python contradiction.py --repo demo_repo --branch violation --no-post`
+still returns `conflict: True` citing *"Cache layer must be Redis"* — `local signals: 0`,
+`semantic recall: 1`, `graph nodes: 11`, all from the shared Cloud graph. The catch
+comes entirely from memory another repo populated.
+
 **Full two-repo theatrical demo** (a second repo wired to the same tenant catches a
 Redis→Map PR citing a decision remembered in repo A):
 ```bash
