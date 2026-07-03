@@ -129,6 +129,9 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
 
     if not candidates:
         console.print("[yellow]No relevant memories found — nothing to contradict.[/yellow]")
+        if post_comment:
+            import github
+            github.post_commit_status(sha, "success", "No relevant memories — nothing to contradict")
         await cognee_client.disconnect()
         return {"conflict": False, "decision_violated": "", "explanation": "No relevant memories.", "confidence": 1.0}
 
@@ -145,9 +148,15 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
     ))
 
     if verdict["conflict"]:
-        # post_or_print is sync; import here to avoid module-level requests import cost
+        # post_or_print is sync; import here to avoid module-level requests cost
         import github
         github.post_or_print(verdict, sha=sha, post_comment=post_comment)
+    elif post_comment:
+        # Clean PR: post a green check so CodeMind always shows up in the PR check
+        # summary (green on clean, red on conflict). Lets the check be a *required*
+        # status check that blocks merge on conflict but not on clean PRs.
+        import github
+        github.post_commit_status(sha, "success", "No contradiction with past decisions")
 
     await cognee_client.disconnect()
     return verdict

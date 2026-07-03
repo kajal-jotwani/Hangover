@@ -1,0 +1,59 @@
+# CodeMind — auto-ingest on merge ("no action needed, just learning").
+#
+# When a PR merges to the default branch, walk only the newly-merged commits
+# (github.event.before..after) and remember() any durable decisions they carry.
+# The shared Cognee Cloud graph grows itself with the team's history — no manual
+# seeding required. This is the "self-learning memory" half of the thesis.
+#
+# OPT-IN: this workflow only runs on repos that set the repository variable
+#   CODEMIND_AUTO_INGEST = true
+# (Settings → Secrets and variables → Actions → Variables → New repository variable).
+# The CodeMind meta-repo itself does NOT set it, so this never fires here and
+# never pollutes the demo graph with the project's own commit history. Customer
+# repos opt in to get self-learning memory.
+name: CodeMind — auto-ingest on merge
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  ingest:
+    if: vars.CODEMIND_AUTO_INGEST == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need the before..after range, not just the last commit
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Remember decisions from the newly-merged commits
+        env:
+          COGNEE_URL: ${{ secrets.COGNEE_URL }}
+          COGNEE_API_KEY: ${{ secrets.COGNEE_API_KEY }}
+          COGNEE_TENANT_ID: ${{ secrets.COGNEE_TENANT_ID }}
+          COGNEE_USER_ID: ${{ secrets.COGNEE_USER_ID }}
+          COGNEE_DATASET: ${{ secrets.COGNEE_DATASET }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          set -e
+          # On the very first push (or a force-push) `before` is all zeros and
+          # there's no range to walk — ingest just the landing commit.
+          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
+            echo "No 'before' SHA (first push / force-push) — ingesting the landing commit only."
+            python ingest.py --repo . --since "$AFTER~1" --head "$AFTER"
+          else
+            python ingest.py --repo . --since "$BEFORE" --head "$AFTER"
+          fi

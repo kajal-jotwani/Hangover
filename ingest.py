@@ -4,6 +4,8 @@ into Cognee, and record each memory's data_id in the registry.
 Usage:
   python ingest.py --repo demo_repo
   python ingest.py --repo demo_repo --reset   # forget the dataset first
+  python ingest.py --repo . --since <sha> --head <sha>   # incremental (auto-ingest on merge)
+  python ingest.py --repo . --since <sha> --head <sha> --dry-run  # print, don't remember
 """
 from __future__ import annotations
 
@@ -18,15 +20,18 @@ from rich.panel import Panel
 import cognee_client
 import registry
 from config import DATASET_NAME, DEMO_REPO, check_keys
-from git_io import log_commits
+from git_io import log_commits, log_commits_range
 from llm import extract_decision
 
 console = Console()
 
 
-async def ingest(repo_path: str, *, reset: bool) -> None:
+async def ingest(repo_path: str, *, reset: bool, since: str | None = None,
+                 head: str | None = None, dry_run: bool = False) -> None:
     check_keys(need_cognee=True, need_llm=True)
-    await cognee_client.connect()
+    # Dry-run still needs the LLM (to extract decisions) but NOT Cognee.
+    if not dry_run:
+        await cognee_client.connect()
 
     if reset:
         # Surgical reset: forget each known data_id from the registry, NOT the
@@ -46,8 +51,17 @@ async def ingest(repo_path: str, *, reset: bool) -> None:
         registry.save_registry({})
         cognee_client.seed_seen(set())  # clear seen-set for clean diffing
 
-    commits = log_commits(repo_path)
-    console.print(f"Found {len(commits)} commits in [cyan]{repo_path}[/cyan]\n")
+    # Incremental range (auto-ingest on merge) vs full history walk.
+    if since and head:
+        commits = log_commits_range(repo_path, base=since, head=head)
+        console.print(f"[bold]Incremental[/bold] {since[:8]}..{head[:8]}: "
+                      f"{len(commits)} new commit(s) in [cyan]{repo_path}[/cyan]\n")
+    else:
+        commits = log_commits(repo_path)
+        console.print(f"Found {len(commits)} commits in [cyan]{repo_path}[/cyan]\n")
+
+    if dry_run:
+        console.print("[yellow]DRY RUN — extracting decisions only, NOT calling remember().[/yellow]\n")
 
     remembered = 0
     for i, commit in enumerate(commits, 1):
@@ -65,6 +79,10 @@ async def ingest(repo_path: str, *, reset: bool) -> None:
         )
         console.print(f"  [green]decision:[/green] {decision['decision'][:80]}")
         console.print(f"  [green]scope:[/green] {decision['scope'][:80]}")
+        if dry_run:
+            console.print(f"  [yellow](dry-run — would remember() with importance {importance:.2f})[/yellow]\n")
+            remembered += 1
+            continue
         res = await cognee_client.remember_decision(text, importance_weight=importance)
         decision_id = f"D{remembered + 1}-{commit.sha[:8]}"
         registry.add_entry(
@@ -85,31 +103,50 @@ async def ingest(repo_path: str, *, reset: bool) -> None:
         console.print(f"  [blue]registry id:[/blue] {decision_id}\n")
         remembered += 1
 
-    console.print(Panel.fit(
-        f"Remembered {remembered} decisions into dataset [cyan]{DATASET_NAME}[/cyan].\n"
-        f"Registry: {registry.REGISTRY_PATH}",
-        title="Ingest complete",
-        style="green",
-    ))
+    if dry_run:
+        console.print(Panel.fit(
+            f"Dry run: would remember {remembered} decision(s) from "
+            f"{len(commits)} commit(s). No memory changed.",
+            title="Dry run complete", style="yellow",
+        ))
+    else:
+        console.print(Panel.fit(
+            f"Remembered {remembered} decisions into dataset [cyan]{DATASET_NAME}[/cyan].\n"
+            f"Registry: {registry.REGISTRY_PATH}",
+            title="Ingest complete",
+            style="green",
+        ))
 
-    # Checkpoint: contrastive recall — the 'before' answer the demo compares against
-    console.print("\n[bold]Checkpoint — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
-    answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
-    for a in answers:
-        console.print(f"  - {a[:220]}")
+    # Checkpoint: contrastive recall — the 'before' answer the demo compares against.
+    # Only meaningful for the full demo ingest (not incremental / not dry-run).
+    if not dry_run and not (since and head):
+        console.print("\n[bold]Checkpoint — recall('can I use an in-memory Map cache instead of Redis?'):[/bold]")
+        answers = await cognee_client.recall_decisions("can I use an in-memory Map cache instead of Redis?")
+        for a in answers:
+            console.print(f"  - {a[:220]}")
 
-    await cognee_client.disconnect()
+    if not dry_run:
+        await cognee_client.disconnect()
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", default=str(DEMO_REPO))
     ap.add_argument("--reset", action="store_true")
+    ap.add_argument("--since", default=None,
+                    help="base SHA for incremental ingest (auto-ingest on merge); "
+                         "paired with --head, walks only base..head")
+    ap.add_argument("--head", default=None,
+                    help="head SHA for incremental ingest; paired with --since")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="extract decisions and print them, but do NOT call remember() "
+                         "(no Cognee connection, no memory change)")
     args = ap.parse_args()
     repo = args.repo if os.path.isabs(args.repo) else os.path.join(os.getcwd(), args.repo)
     if not os.path.isdir(os.path.join(repo, ".git")):
         sys.exit(f"Not a git repo: {repo}  (run scripts/seed_demo_repo.sh first)")
-    asyncio.run(ingest(repo, reset=args.reset))
+    asyncio.run(ingest(repo, reset=args.reset, since=args.since,
+                       head=args.head, dry_run=args.dry_run))
 
 
 if __name__ == "__main__":

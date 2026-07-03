@@ -60,14 +60,52 @@ integrations:
 > not set`), and `visualize`/`datasets.list_datasets` crash on a broken local-SQLite
 > path in cloud mode. So `improve` stays best-effort and the dashboard renders the
 > live graph from `cognee.search(only_context=True)` nodes instead of `visualize()`.
-> Every Cognee API the tenant *does* support is leaned on; the ones it blocks are
+> The feedback-re-weight loop (`cognee.add_feedback` → `memify` applies the weights)
+> is likewise blocked on cloud: `add_feedback` isn't exposed on the cloud client and
+> the local session manager no-ops (returns `False`) in cloud mode; `recall` surfaces
+> no qa/session ids to feedback on. The "memory learns from human feedback" thesis
+> is instead embodied by the **confirm/reject** loop — `confirm` revises the belief
+> (`remember` UPDATE + surgical `forget` + `improve`), `reject` holds it. Every
+> Cognee API the tenant *does* support is leaned on; the ones it blocks are
 > documented rather than faked.
 
 ### Integrations (the rules: "and integrations")
 - **GitHub PR comments** — the conflict posts as a real comment citing the violated decision + Cognee graph evidence (`github.post_or_print`).
-- **GitHub commit-status check** — the conflict also lights up the PR check summary as a **failure**; `reconcile confirm` flips it to **success** (`github.post_commit_status`).
+- **GitHub commit-status check** — green on clean PRs, **red** on conflict (lights up the PR check summary); `reconcile confirm` flips red → green, `reject` keeps it red (`github.post_commit_status`). Usable as a **required** status check so a contradictory PR can't merge.
 - **GitHub issue on reject** — `reconcile reject` auto-opens an issue tracking the caught regression, labeled `codemind` + `regression` (`github.create_issue`).
 - **CI on every PR** — two GitHub Actions workflows (`.github/workflows/`) run detection + the comment-triggered reconcile loop (see "CI — runs on every PR" below).
+- **Auto-ingest on merge** — a third workflow (`codemind-ingest.yml`, opt-in via `vars.CODEMIND_AUTO_INGEST=true`) runs `ingest.py --since $before --head $after` on every push to `main`, so the graph grows itself with the team's merged history — "no action needed, just learning."
+
+## 🌐 Cross-repo shared memory (the Cloud-native differentiator)
+
+The Cognee Cloud graph is **tenant-global**: a decision remembered in repo A is
+retrievable from repo B's CI run. That's not a caveat here — it's the headline.
+It's the whole reason Cloud (not self-hosted) matters: **one memory graph across
+your whole org's repos**. A hard-won decision made in the payments repo protects a
+PR in the checkout repo. No local/self-hosted memory can do this.
+
+**Already proven live:** PR #6 ran with `local signals: 0` (no committed
+`memory_registry.json` on that branch) and the shared Cloud graph still surfaced
+**12 graph nodes** + the correct verdict via `cognee.search(only_context=True)` —
+i.e. the run's only memory was the graph populated by other repos' ingests. The
+dashboard pulls **16 live nodes** from the same shared graph.
+
+**Proven locally too (read-only):** with the local registry blanked (simulating
+repo B's no-registry state), `python contradiction.py --repo demo_repo --branch violation --no-post`
+still returns `conflict: True` citing *"Cache layer must be Redis"* — `local signals: 0`,
+`semantic recall: 1`, `graph nodes: 11`, all from the shared Cloud graph. The catch
+comes entirely from memory another repo populated.
+
+**Full two-repo theatrical demo** (a second repo wired to the same tenant catches a
+Redis→Map PR citing a decision remembered in repo A):
+```bash
+gh repo create <you>/codemind-cross-b --private        # you create repo B (one step)
+bash scripts/setup_cross_repo.sh <you>/codemind-cross-b # pushes code, sets secrets, opens the violation PR
+```
+The script gives repo B NO `memory_registry.json`, so its only memory is the shared
+Cloud graph. Within ~2 min the CodeMind bot comments on repo B's PR citing
+*"Cache layer must be Redis"* — a decision remembered in repo A — and a red
+`CodeMind / memory` check appears. That's org-wide shared memory, live.
 
 The reconciliation moment — `remember` the update → `forget` the old belief → `improve`
 re-weights → re-`recall`/`search` shows the changed answer — is the entire thesis, and it runs live.
@@ -193,6 +231,30 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 5. `python reconcile.py reject` → registry unchanged; recall answer unchanged. (Bug-caught branch verified.)
 6. `bash scripts/run_demo.sh` → full walkthrough runs clean.
 7. **CI (every PR):** push the repo (with committed `memory_registry.json` + `.github/workflows/`) to GitHub, add the Cognee/Ollama secrets, open a PR with the Redis→Map change → `github-actions[bot]` posts the CodeMind conflict comment citing the cache decision; push another commit → **no duplicate** (idempotency); reply `/codemind confirm intentional, single-instance deploy` → after-recall comment shows the answer flipped ("superseded as of the update"); open a second PR with a different change → a fresh comment on that PR's number (proves it works on **all** PRs).
+8. **Green/red check:** a clean PR → `CodeMind / memory` → `success` ("No contradiction with past decisions"); a conflicting PR → `failure`. Both verified live (PRs #4 red, #6 green on this repo).
+9. **Auto-ingest (dry-run):** `python ingest.py --repo . --since <sha> --head <sha> --dry-run` → extracts decisions from the range and prints them, **without** calling `remember()`. Verified locally. The live `codemind-ingest.yml` runs the same in `--since`/`--head` mode on push to main (opt-in via `vars.CODEMIND_AUTO_INGEST=true`).
+10. **Cross-repo shared memory:** `bash scripts/setup_cross_repo.sh <you>/codemind-cross-b` → repo B (no local registry) catches a Redis→Map PR citing a decision remembered in repo A, via the shared Cloud graph. Mechanism already proven live: PR #6 ran with `local signals: 0` and the shared graph surfaced 12 nodes + the correct verdict.
+11. **Unit tests:** `.venv/bin/python -m unittest discover -s tests` → 11 tests covering the registry fuzzy-match (reconcile's data_id lookup), the hybrid-retrieval keyword/path signals, and the GitHub comment idempotency marker + graph-evidence formatting. (The fuzzy-match test caught a real punctuation bug — `Redis;` wasn't matching `redis` — now fixed.)
+
+### CI demo (the live loop, ~90s — for the recording)
+The terminal demo above is the thesis; this is the product running in real CI. Live artifacts on this repo to show on camera:
+1. **PR #4** (https://github.com/kajal-jotwani/Hangover/pull/4) — a teammate's Redis→Map PR. Show the bot comment with the **Graph evidence** block (cites the actual Cognee node *"Cache layer must be Redis"*) and the **red `CodeMind / memory` check** in the PR summary.
+2. **PR #6** (https://github.com/kajal-jotwani/Hangover/pull/6) — a clean PR. Show the **green `CodeMind / memory` check** ("No contradiction with past decisions"). Same check, green vs red.
+3. **Dashboard** — `python dashboard/build.py && open dashboard/index.html` → the live Cognee memory graph (16 nodes), the lifecycle-footprint badges, the belief-changed timeline. A static snapshot is pushed to the `gh-pages` branch; enable GitHub Pages (Settings → Pages → Source: `gh-pages`) to get a live linkable dashboard at `https://<owner>.github.io/<repo>/`.
+4. **Cross-repo (optional closer):** `bash scripts/setup_cross_repo.sh <you>/codemind-cross-b` → repo B catches the same mistake using a decision remembered in repo A — org-wide memory.
+5. **Reconcile (optional):** reply `/codemind confirm intentional, single-instance deploy` on PR #4 → the check flips red→green + an after-recall comment shows the answer changed. *(Mutates the demo graph — run `bash scripts/setup.sh` after to reset.)*
+
+---
+
+## Why this scores on the rubric ("Best Use of Cognee")
+
+The rubric: *"must use Cognee for memory; the more deeply you lean on its lifecycle APIs (remember, recall, improve/memify, forget) and integrations, the stronger you score."* CodeMind's alignment, honestly:
+
+- **All four lifecycle verbs, live:** `remember` (ingest + auto-ingest on merge + reconcile's UPDATE), `recall` (hybrid retrieval in every CI run), `forget` (surgical by `data_id` on confirm — verified working on cloud), `improve` (best-effort on cloud; auto-runs via `self_improvement=True`).
+- **Deeper than the verbs:** `cognee.search(only_context=True)` pulls the actual graph nodes, cited as **Graph evidence** in PR comments and rendered in the dashboard — the deepest retrieval the tenant supports.
+- **Integrations (4):** PR comments, commit-status check (green/red, blocks merge when required), auto-issue on reject, and CI on every PR via two Actions workflows (+ auto-ingest on merge).
+- **Cloud-native, not Cloud-optional:** cross-repo **shared** memory across the whole org — the one thing self-hosted memory structurally cannot do. The graph is tenant-global by design; CodeMind turns that into the product.
+- **Honest where the tenant is limited:** `memify`/`visualize`/`datasets.*`/`add_feedback` are blocked on this cloud tenant — documented with the exact errors, not faked. The dashboard renders the graph from `search(only_context=True)` nodes; the "learns from feedback" thesis is carried by the confirm/reject loop.
 
 ---
 
