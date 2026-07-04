@@ -160,6 +160,29 @@ class TestMonorepoScaling(unittest.TestCase):
         from contradiction import _focused_diff
         self.assertEqual(_focused_diff({}, ["anything"]), "")
 
+    def test_focused_diff_surfaces_high_deletion_files_first(self):
+        """A revert's heavily-deleted CODE file must beat a low-deletion data
+        file when both are relevant, so the judge sees the code revert, not a
+        sea of bin/json drops. This is the fix that let the audit catch the
+        real cognee token-usage + retry contradictions."""
+        from contradiction import _split_diff_by_file, _focused_diff
+        diff = (
+            "diff --git a/eval/results/dense.json b/eval/results/dense.json\n"
+            + "".join(f"-data line {i}\n" for i in range(3)) +  # 3 deletions (noise)
+            "diff --git a/eval/measure.py b/eval/measure.py\n"
+            + "".join(f"-def func_{i}(): pass\n" for i in range(20)) +  # 20 deletions (real code)
+            "diff --git a/eval/plot.py b/eval/plot.py\n"
+            "+unrelated padding " + "x" * 200 + "\n"
+        )
+        hunks = _split_diff_by_file(diff)
+        # both .json and .py are "relevant"; under a tight cap the high-deletion
+        # .py must come first so the judge sees the removed code.
+        focused = _focused_diff(hunks,
+                                ["eval/results/dense.json", "eval/measure.py", "eval/plot.py"],
+                                cap=300)
+        self.assertIn("def func_0", focused,
+                       "high-deletion code file must surface before low-deletion data file")
+
 
 class TestScopeMatchedFiles(_TempRegistryMixin, unittest.TestCase):
     def setUp(self):

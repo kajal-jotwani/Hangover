@@ -128,18 +128,30 @@ def _focused_diff(file_hunks: dict[str, str], relevant_files: list[str],
     truncation keeps the decision-relevant hunks, not arbitrary
     alphabetically-early ones — the same fix as the retrieval query, applied to
     what the judge actually sees.
+
+    The non-relevant remainder is ordered by deletion-line count descending so a
+    REVERT (which deletes a lot of code across many files) surfaces the removed
+    code files before low-deletion noise like binary asset drops ("Bin X -> 0
+    bytes"). Without this, a revert's real code deletions can be truncated out
+    of the judge's view behind a sea of bin/png hunks, and the contradiction is
+    silently missed.
     """
+    def _deletions(h: str) -> int:
+        return sum(1 for line in h.splitlines() if line.startswith("-") and not line.startswith("---"))
+
     ordered: list[str] = []
     seen: set[str] = set()
-    for f in relevant_files:
-        h = file_hunks.get(f)
-        if h is not None and f not in seen:
-            ordered.append(h)
-            seen.add(f)
-    for f, h in file_hunks.items():
-        if f not in seen:
-            ordered.append(h)
-            seen.add(f)
+    # relevant files first, but within that bucket ordered by deletion count so a
+    # revert's heavily-deleted CODE files come before low-deletion relevant noise
+    # (results/*.json, README) — otherwise the cap is spent on noise and the code
+    # revert is truncated out of the judge's view.
+    rel = [(f, file_hunks[f]) for f in relevant_files if f in file_hunks and f not in seen]
+    for f, _ in sorted(rel, key=lambda fh: _deletions(fh[1]), reverse=True):
+        ordered.append(file_hunks[f]); seen.add(f)
+    # remainder: most-deletion files first (surfaces revert code before bin drops)
+    rest = [(f, h) for f, h in file_hunks.items() if f not in seen]
+    for _, h in sorted(rest, key=lambda fh: _deletions(fh[1]), reverse=True):
+        ordered.append(h)
     return "\n".join(ordered)[:cap] if ordered else ""
 
 
@@ -201,11 +213,20 @@ def _entry_text(entry: dict) -> str:
             f"Source commit: {(entry.get('sha') or '')[:8]}")
 
 
-async def detect(repo_path: str, *, branch: str | None, head: str | None,
-                 base: str | None = None, post_comment: bool = True) -> dict:
-    check_keys(need_cognee=True, need_llm=True)
-    await cognee_client.connect()
+async def detect_core(repo_path: str, *, branch: str | None, head: str | None,
+                      base: str | None = None) -> dict:
+    """The reusable detection core: retrieval + judge, no IO side-effects.
 
+    Assumes cognee_client is already connected. Does NOT post PR comments or
+    commit statuses and does NOT connect/disconnect — so it can be called in a
+    loop (audit, cross-repo proof) over one open connection. Returns the verdict
+    plus the retrieval counts so callers can show "local signals: 0, graph
+    nodes: N" evidence, and a `had_candidates` flag so the wrapper can decide
+    whether to post the clean-PR green check.
+
+    The CI path (detect()) wraps this: connect -> detect_core -> post status/
+    comment -> disconnect. Behavior is identical to the pre-refactor detect().
+    """
     if base and head:
         # PR range: explicit base..head SHAs (CI passes github.event.pull_request.base/head).
         diff, touched = diff_of_branch(repo_path, base=base, head=head)
@@ -270,11 +291,11 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
 
     if not candidates:
         console.print("[yellow]No relevant memories found — nothing to contradict.[/yellow]")
-        if post_comment:
-            import github
-            github.post_commit_status(sha, "success", "No relevant memories — nothing to contradict")
-        await cognee_client.disconnect()
-        return {"conflict": False, "decision_violated": "", "explanation": "No relevant memories.", "confidence": 1.0}
+        return {
+            "conflict": False, "decision_violated": "", "explanation": "No relevant memories.",
+            "confidence": 1.0, "graph_nodes": [], "sha": sha, "had_candidates": False,
+            "local_count": 0, "recalled_count": 0, "graph_count": 0, "candidates_count": 0,
+        }
 
     # focused diff: relevant files first so the judge's truncation keeps the
     # decision-relevant hunks, not arbitrary alphabetically-early ones.
@@ -284,6 +305,12 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
     verdict = judge_contradiction(focused, candidates)
     # Attach the graph nodes that informed the verdict so the PR comment can cite them.
     verdict["graph_nodes"] = graph_nodes
+    verdict["sha"] = sha
+    verdict["had_candidates"] = True
+    verdict["local_count"] = len(local)
+    verdict["recalled_count"] = len(recalled)
+    verdict["graph_count"] = len(graph_nodes)
+    verdict["candidates_count"] = len(candidates)
     console.print(Panel.fit(
         f"conflict: {verdict['conflict']}\n"
         f"decision_violated: {verdict['decision_violated'][:100]}\n"
@@ -291,7 +318,32 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         f"confidence: {verdict['confidence']}",
         title="Verdict", style="red" if verdict["conflict"] else "green",
     ))
+    return verdict
 
+
+async def detect(repo_path: str, *, branch: str | None, head: str | None,
+                 base: str | None = None, post_comment: bool = True) -> dict:
+    """CI path: connect -> detect_core -> post status/comment -> disconnect.
+
+    Thin wrapper over detect_core() that owns the Cognee connection and the
+    GitHub side-effects (PR comment + commit-status check). The reusable core
+    is detect_core(); this preserves the exact pre-refactor CI behavior:
+    green check on clean PRs, red + PR comment on conflict.
+    """
+    check_keys(need_cognee=True, need_llm=True)
+    await cognee_client.connect()
+    try:
+        verdict = await detect_core(repo_path, branch=branch, head=head, base=base)
+    finally:
+        # Always disconnect, even if judging raised.
+        await cognee_client.disconnect()
+
+    sha = verdict.get("sha") or head or branch or "HEAD"
+    if not verdict.get("had_candidates"):
+        if post_comment:
+            import github
+            github.post_commit_status(sha, "success", "No relevant memories — nothing to contradict")
+        return verdict
     if verdict["conflict"]:
         # post_or_print is sync; import here to avoid module-level requests cost
         import github
@@ -302,8 +354,6 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         # status check that blocks merge on conflict but not on clean PRs.
         import github
         github.post_commit_status(sha, "success", "No contradiction with past decisions")
-
-    await cognee_client.disconnect()
     return verdict
 
 

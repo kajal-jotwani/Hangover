@@ -96,6 +96,14 @@ still returns `conflict: True` citing *"Cache layer must be Redis"* — `local s
 `semantic recall: 1`, `graph nodes: 11`, all from the shared Cloud graph. The catch
 comes entirely from memory another repo populated.
 
+**Proven on real cognee history (with a precision number):** see
+[🔬 Real-code proof](#-real-code-proof-it-works-on-real-repos-with-numbers)
+below — we ran CodeMind against `topoteretes/cognee`'s own commit history and
+caught real contradictions (a retry-policy refactor that silently moved off an
+established class constant; a README using a non-canonical env var name) with
+**precision 0.67**, graph-only (`local signals: 0`). Real code, real numbers —
+not a scripted demo.
+
 **Full two-repo theatrical demo** (a second repo wired to the same tenant catches a
 Redis→Map PR citing a decision remembered in repo A):
 ```bash
@@ -109,6 +117,51 @@ Cloud graph. Within ~2 min the CodeMind bot comments on repo B's PR citing
 
 The reconciliation moment — `remember` the update → `forget` the old belief → `improve`
 re-weights → re-`recall`/`search` shows the changed answer — is the entire thesis, and it runs live.
+
+---
+
+## 🔬 Real-code proof (it works on real repos, with numbers)
+
+The hand-seeded Redis demo proves the mechanism. The real-code proof proves it
+generalizes: we ran CodeMind against **`topoteretes/cognee`'s own commit history**
+— ingest its commits into a Cognee dataset, then scan each commit's diff against
+the graph of decisions CodeMind extracted from that history. No hand-seeded data;
+the same `detect_core()` that runs in CI on every PR.
+
+- **Catch reel ([`CAUGHT.md`](CAUGHT.md))** — the real contradictions CodeMind
+  caught in cognee's own history, each citing the violated decision + the graph
+  node it was retrieved from, with retrieval counts.
+- **Precision ([`EVAL.md`](EVAL.md))** — each catch hand-labeled TRUE /
+  false-positive against the actual cognee diffs. **Precision = 2/3 = 0.67** on
+  real cognee history, graph-only (`local signals: 0`).
+- **Cross-repo hero ([`PROOF.md`](PROOF.md))** — with the local registry blanked
+  (simulating repo B: no own-memory), detection on a real cognee commit that
+  contradicts a graph decision returns `conflict: True` with `local signals: 0` —
+  the catch comes entirely from the shared Cloud graph. Real data, not the
+  scripted Redis PR.
+
+The two true catches — a retry-policy refactor that silently moved off an
+established `GenericAPIAdapter.MAX_RETRIES` class constant, and a README using a
+non-canonical `COGNEE_BASE_URL` against a just-shipped env-var standardization —
+are exactly the kind of tribal-knowledge regressions no static linter or
+snapshot-summarizer would flag. The one false positive was a judge
+rationalization where the cited evidence didn't match the claimed decision (a
+known LLM-judge failure mode and an obvious target for a citation-consistency
+guard).
+
+**Fair methodology:** the older half of the audited window is ingested to build
+the decision graph; only the newer half is scanned against it. So a scanned
+commit is never judged against a decision a *later* commit established — no
+temporal-leakage false positives. This mirrors the real product: a team's
+accumulated memory vs. a new commit.
+
+Reproduce:
+```bash
+python scripts/audit_repo.py --repo /tmp/cognee_real --dataset codemind_cognee \
+    --max-count 80 --scan 40 --out CAUGHT.md
+python scripts/cross_repo_proof.py --repo /tmp/cognee_real --dataset codemind_cognee
+python scripts/audit_repo.py --cleanup --dataset codemind_cognee   # restore tenant
+```
 
 ---
 
