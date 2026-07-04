@@ -1,13 +1,32 @@
 """Shared configuration: env loading + constants + Cognee connection helper."""
 from __future__ import annotations
 
+import subprocess
 import os
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Project root = directory containing this file
-ROOT = Path(__file__).resolve().parent
+def _discover_root() -> Path:
+    override = os.getenv("CODEMIND_ROOT", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+    try:
+        proc = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            return Path(proc.stdout.strip()).resolve()
+    except Exception:
+        pass
+    return Path.cwd().resolve()
+
+
+# Project root = the current repo root when available; otherwise cwd.
+ROOT = _discover_root()
 load_dotenv(ROOT / ".env")
 
 # --- Cognee Cloud ---
@@ -52,5 +71,5 @@ def check_keys(*, need_cognee: bool = True, need_llm: bool = False) -> None:
     if missing:
         raise SystemExit(
             "Missing env vars: " + ", ".join(missing) + ". "
-            "Fill them in ~/desktop/codemind/.env (see .env.example)."
+            f"Fill them in {ROOT / '.env'} (see .env.example)."
         )

@@ -65,14 +65,11 @@ git -C "$TMP" remote add origin "https://github.com/$REPO_B.git"
 git -C "$TMP" push -f origin main
 
 echo "==> Setting Cognee + Ollama secrets on $REPO_B (same tenant as repo A; values not printed)"
-# shellcheck disable=SC1091
-set -a; source "$HERE/.env" 2>/dev/null || true; set +a
-for kv in COGNEE_URL COGNEE_API_KEY COGNEE_TENANT_ID COGNEE_USER_ID COGNEE_DATASET OLLAMA_API_KEY OLLAMA_MODEL; do
-  val="${!kv:-}"
-  if [ -z "$val" ]; then echo "  warn: $kv not set in .env — skipping"; continue; fi
-  printf '%s' "$val" | gh secret set "$kv" --repo "$REPO_B" >/dev/null
-  echo "  set $kv"
-done
+PY="$HERE/.venv/bin/python"
+if [ ! -x "$PY" ]; then PY="python3"; fi
+pushd "$TMP" >/dev/null
+"$PY" -m codemind.cli link --repo "$REPO_B" --no-workflows
+popd >/dev/null
 
 echo "==> Creating the violation branch (Redis → in-memory Map) + opening the PR"
 git -C "$TMP" checkout -b violation

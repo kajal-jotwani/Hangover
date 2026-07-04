@@ -1,0 +1,105 @@
+# CodeMind — reconciliation loop, triggered by a PR comment.
+#
+# A maintainer replies to a CodeMind conflict comment with:
+#   /codemind confirm <reason>   → the change is intentional: remember the UPDATE,
+#                                   surgically forget the old belief, improve() the
+#                                   graph, then re-ask and post the new answer.
+#   /codemind reject              → the change is a bug: NO memory change, re-ask to
+#                                   confirm the old belief still holds.
+#
+# The runner is fresh, so we re-derive the conflict from the PR diff (--no-post so
+# we don't duplicate the conflict comment) before running reconcile --ci, which
+# posts the after-recall result as a new PR comment (the loop-closing beat).
+name: CodeMind — reconcile
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  pull-requests: write   # post the after-recall comment
+  statuses: write          # flip the commit status failure -> success (confirm) / keep red (reject)
+  issues: write             # open a regression issue on reject
+  contents: read
+
+jobs:
+  reconcile:
+    # Only PR comments (not issues) that start with /codemind, not from the bot itself.
+    if: |
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/codemind ') &&
+      github.event.comment.user.login != 'github-actions[bot]' &&
+      !endsWith(github.event.comment.user.login, '[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse command
+        id: cmd
+        env:
+          BODY: ${{ github.event.comment.body }}
+        run: |
+          # /codemind confirm <reason...>  |  /codemind reject
+          ACTION=$(echo "$BODY" | awk '{print $2}')
+          REASON=$(echo "$BODY" | cut -d' ' -f3-)
+          echo "action=$ACTION" >> "$GITHUB_OUTPUT"
+          # multi-line reason must be URL-safe for the env injection below
+          echo "reason=$(printf '%s' "$REASON" | tr '\n' ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Fail fast on unknown command
+        if: steps.cmd.outputs.action != 'confirm' && steps.cmd.outputs.action != 'reject'
+        run: |
+          echo "Unknown /codemind command: '${{ steps.cmd.outputs.action }}'"
+          echo "Use: /codemind confirm <reason>  or  /codemind reject"
+          exit 1
+
+      - name: Get PR head/base SHAs
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          echo "head=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json headRefOid -q .headRefOid)" >> "$GITHUB_OUTPUT"
+          echo "base=$(gh pr view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json baseRefOid -q .baseRefOid)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr.outputs.head }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Re-derive the conflict (no duplicate comment)
+        env:
+          COGNEE_URL: ${{ secrets.COGNEE_URL }}
+          COGNEE_API_KEY: ${{ secrets.COGNEE_API_KEY }}
+          COGNEE_TENANT_ID: ${{ secrets.COGNEE_TENANT_ID }}
+          COGNEE_USER_ID: ${{ secrets.COGNEE_USER_ID }}
+          COGNEE_DATASET: ${{ secrets.COGNEE_DATASET }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
+        run: |
+          python contradiction.py --repo . --no-post \
+            --base "${{ steps.pr.outputs.base }}" \
+            --head  "${{ steps.pr.outputs.head }}"
+
+      - name: Run reconcile
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_PR_NUMBER: ${{ github.event.issue.number }}
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          COGNEE_URL: ${{ secrets.COGNEE_URL }}
+          COGNEE_API_KEY: ${{ secrets.COGNEE_API_KEY }}
+          COGNEE_TENANT_ID: ${{ secrets.COGNEE_TENANT_ID }}
+          COGNEE_USER_ID: ${{ secrets.COGNEE_USER_ID }}
+          COGNEE_DATASET: ${{ secrets.COGNEE_DATASET }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
+        run: |
+          if [ "${{ steps.cmd.outputs.action }}" = "confirm" ]; then
+            python reconcile.py confirm --ci --reason "${{ steps.cmd.outputs.reason }}"
+          else
+            python reconcile.py reject --ci
+          fi

@@ -170,10 +170,17 @@ timeline (feeds the dashboard).
 
 ## Setup
 
-### 1. Environment
+### Primary path
 ```bash
 cd codemind
-python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
+python3.13 -m venv .venv && .venv/bin/pip install -e .
+codemind init
+```
+
+`codemind init` detects the git repo, validates the Cognee + Ollama credentials, writes `.env`, copies the GitHub Actions workflows, sets GitHub secrets when `gh` is available, stores a retention policy, and runs the first bounded ingest.
+
+### Manual / advanced setup
+```bash
 cp .env.example .env
 # Cognee Cloud:  COGNEE_URL (tenant API Base URL), COGNEE_API_KEY (X-Api-Key),
 #               COGNEE_TENANT_ID (X-Tenant-Id), COGNEE_USER_ID (X-User-Id)
@@ -181,13 +188,13 @@ cp .env.example .env
 # (optional: GH_TOKEN, GH_REPO, GH_PR_NUMBER for real PR comments)
 ```
 
-### 2. De-risk the thesis-critical verb (Phase 0 spike)
+### Phase 0 spike
 ```bash
 .venv/bin/python spike.py
 # expect: remembered 2 -> forgot 1 -> 1 remains. Confirms surgical forget() works.
 ```
 
-### 3. Prep the demo (once, before the camera rolls)
+### Prep the demo
 ```bash
 bash scripts/setup.sh
 # rebuilds demo_repo, ingests 4 decisions into Cognee, confirms the 'before' recall

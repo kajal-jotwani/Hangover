@@ -296,6 +296,17 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         # post_or_print is sync; import here to avoid module-level requests cost
         import github
         github.post_or_print(verdict, sha=sha, post_comment=post_comment)
+        entry = registry.find_by_decision_text(verdict.get("decision_violated", ""))
+        if entry:
+            decision_id = next((k for k, v in registry.load_registry().items() if v is entry), "")
+            registry.append_event(
+                "contradiction",
+                sha=sha,
+                decision_violated=verdict.get("decision_violated", ""),
+                decision_id=decision_id,
+                data_id=entry.get("data_id", ""),
+                confidence=verdict.get("confidence", 0.0),
+            )
     elif post_comment:
         # Clean PR: post a green check so CodeMind always shows up in the PR check
         # summary (green on clean, red on conflict). Lets the check be a *required*
