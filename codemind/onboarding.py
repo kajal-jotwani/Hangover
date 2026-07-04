@@ -133,6 +133,61 @@ def workflow_template_text(name: str) -> str:
     return (resources.files("codemind.templates") / name).read_text()
 
 
+# The codemind CI runtime — sibling modules at the codemind repo root that the
+# workflows invoke (contradiction.py, reconcile.py, ingest.py + their imports).
+# These are NOT in the codemind package, so init/link vendors them into the
+# target repo's .codemind/ so CI is self-contained on a foreign repo.
+RUNTIME_FILE_NAMES = [
+    "config.py", "cognee_client.py", "contradiction.py", "registry.py",
+    "llm.py", "git_io.py", "github.py", "reconcile.py", "ingest.py", "spike.py",
+]
+
+CODEMIND_REQUIREMENTS = """\
+# codemind CI runtime deps (vendored into .codemind/ by `codemind init`).
+cognee>=1.0.0
+openai>=1.50.0
+pydantic>=2.0
+gitpython>=3.1
+rich>=13.0
+python-dotenv>=1.0
+requests>=2.31
+"""
+
+
+def _codemind_repo_root() -> Path:
+    # codemind/onboarding.py -> the codemind repo root (where the sibling .py live).
+    return Path(__file__).resolve().parent.parent
+
+
+def vendor_codemind(repo_root: Path, *, force: bool = False) -> list[Path]:
+    """Copy the codemind CI runtime source into <repo_root>/.codemind/.
+
+    The workflows run `python .codemind/contradiction.py` / `reconcile.py` /
+    `ingest.py`; those import their siblings (config, cognee_client, ...) which
+    sit next to them in .codemind/ (Python puts the script's dir on sys.path).
+    """
+    target = repo_root / ".codemind"
+    target.mkdir(parents=True, exist_ok=True)
+    src_root = _codemind_repo_root()
+    copied: list[Path] = []
+    for name in RUNTIME_FILE_NAMES:
+        src = src_root / name
+        if not src.exists():
+            continue
+        dst = target / name
+        if dst.exists() and not force and dst.read_text() == src.read_text():
+            continue
+        dst.write_text(src.read_text())
+        copied.append(dst)
+    req = target / "codemind-requirements.txt"
+    req.write_text(CODEMIND_REQUIREMENTS)
+    copied.append(req)
+    # Keep the vendored runtime out of the host repo's lint/type scope.
+    gitignore = repo_root / ".codemind" / ".gitignore"
+    gitignore.write_text("# vendored by `codemind init` — safe to commit\n")
+    return copied
+
+
 def copy_workflows(repo_root: Path, *, include_auto_ingest: bool, force: bool = False) -> list[Path]:
     target_dir = repo_root / ".github" / "workflows"
     target_dir.mkdir(parents=True, exist_ok=True)

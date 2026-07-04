@@ -27,7 +27,7 @@ def _discover_root() -> Path:
 
 # Project root = the current repo root when available; otherwise cwd.
 ROOT = _discover_root()
-load_dotenv(ROOT / ".env")
+load_dotenv(ROOT / ".env", override=True)
 
 # --- Cognee Cloud ---
 # COGNEE_URL is the tenant API Base URL. COGNEE_API_KEY is sent as X-Api-Key.

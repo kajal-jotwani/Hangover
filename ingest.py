@@ -50,7 +50,17 @@ async def ingest(repo_path: str, *, reset: bool, since: str | None = None,
         else:
             console.print("[dim]Reset: registry empty, starting fresh.[/dim]")
         registry.save_registry({})
-        cognee_client.seed_seen(set())  # clear seen-set for clean diffing
+        cognee_client.seed_seen(set())  # cleared registry -> empty dataset
+    else:
+        # Non-reset ingest: seed the seen-set with existing registry data_ids so
+        # the before/after diff can isolate the NEW id even on a non-empty
+        # dataset. Without this, the diff returns a random existing node id.
+        existing = registry.load_registry()
+        existing_ids = {v.get("data_id") for v in existing.values()
+                        if isinstance(v, dict) and v.get("data_id")}
+        cognee_client.seed_seen(existing_ids)
+        if existing_ids:
+            console.print(f"[dim]Seeding diff with {len(existing_ids)} known data_id(s).[/dim]")
 
     # Incremental range (auto-ingest on merge) vs full history walk.
     if since and head:

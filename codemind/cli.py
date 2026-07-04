@@ -32,6 +32,7 @@ from codemind.onboarding import (
     set_repo_variable,
     validate_cognee_credentials,
     validate_ollama_credentials,
+    vendor_codemind,
 )
 
 console = Console()
@@ -320,8 +321,10 @@ async def _init_flow(repo_root: Path, *, yes: bool, values: dict[str, str], forc
     _mods()
 
     copied = []
+    vendored = []
     if not no_workflows:
         copied = copy_workflows(repo_root, include_auto_ingest=policy.auto_ingest, force=force)
+        vendored = vendor_codemind(repo_root, force=force)
 
     repo_name = _gh_repo_name(repo_root, env_values)
     secrets_result = {"ok": 0, "failed": 0, "skipped": []}
@@ -357,6 +360,7 @@ async def _init_flow(repo_root: Path, *, yes: bool, values: dict[str, str], forc
             f"dataset: [cyan]{env_values.get('COGNEE_DATASET', '')}[/cyan]\n"
             f"remembered: [cyan]{remembered}[/cyan]\n"
             f"workflows: [cyan]{', '.join(str(p.relative_to(repo_root)) for p in copied) if copied else 'skipped'}[/cyan]\n"
+            f"vendored: [cyan]{len(vendored)} files in .codemind/[/cyan]\n"
             f"secrets: [cyan]{secrets_result.get('ok', 0)} ok, {secrets_result.get('failed', 0)} failed[/cyan]\n"
             f"registry: [cyan]{'present' if (repo_root / 'memory_registry.json').exists() else 'absent'}[/cyan]\n"
             f"policy: [cyan]{repo_root / 'codemind_config.json'}[/cyan]\n"
@@ -514,14 +518,49 @@ def status(cross_repo: bool) -> None:
     console.print(table)
 
 
+def _default_branch(root: Path) -> str:
+    """Auto-detect the repo's default branch (origin/HEAD); fall back to main."""
+    proc = subprocess.run(
+        ["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        return proc.stdout.strip().replace("origin/", "", 1)
+    return "main"
+
+
 @main.command(name="check")
-def check() -> None:
+@click.option("--base", default=None, help="base ref to diff against (default: repo's default branch)")
+def check(base: str | None) -> None:
     """Run contradiction detection against the current branch locally."""
     mods = _mods()
     root = mods["ROOT"]
     branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root, capture_output=True, text=True, check=False).stdout.strip() or "HEAD"
-    verdict = asyncio.run(mods["contradiction"].detect(str(root), branch=branch, head=None, base="main", post_comment=False))
+    base_ref = base or _default_branch(root)
+    verdict = asyncio.run(mods["contradiction"].detect(str(root), branch=branch, head=None, base=base_ref, post_comment=False))
     console.print_json(data=verdict)
+
+
+@main.group(name="reconcile")
+def reconcile() -> None:
+    """Resolve a pending contradiction — confirm (memory revises) or reject (bug caught)."""
+
+
+@reconcile.command(name="confirm")
+@click.option("--reason", required=True, help="why the change is intentional (recorded as the UPDATE rationale)")
+@click.option("--query", default=None, help="override the proof recall query")
+def reconcile_confirm(reason: str, query: str | None) -> None:
+    """Mark the latest conflict intentional: remember UPDATE, forget old, improve, re-ask."""
+    import reconcile as reconcile_module
+    asyncio.run(reconcile_module._run("confirm", None, reason, query, ci=False))
+
+
+@reconcile.command(name="reject")
+@click.option("--query", default=None, help="override the proof recall query")
+def reconcile_reject(query: str | None) -> None:
+    """Mark the latest conflict a bug: NO memory change, re-ask to confirm the old belief."""
+    import reconcile as reconcile_module
+    asyncio.run(reconcile_module._run("reject", None, "", query, ci=False))
 
 
 @main.command(name="doctor")
@@ -594,6 +633,7 @@ def link(repo: str, new: bool, dataset: str | None, no_workflows: bool, no_secre
         env["COGNEE_DATASET"] = dataset
     if not no_workflows:
         copy_workflows(root, include_auto_ingest=auto_ingest or env.get("CODEMIND_AUTO_INGEST", "").lower() == "true", force=force)
+        vendor_codemind(root, force=force)
     if not no_secrets:
         result = set_repo_secrets(repo, env)
         console.print(f"secrets: {result['ok']} ok, {result['failed']} failed")

@@ -214,7 +214,7 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         diff, touched = diff_of_commit(repo_path, head)
         sha = head
     else:
-        diff, touched = diff_of_branch(repo_path, base="main", head=branch or "HEAD")
+        diff, touched = diff_of_branch(repo_path, base=base or "main", head=branch or "HEAD")
         sha = branch or "HEAD"
 
     console.print(f"[bold]Diff[/bold] from {sha}, {len(touched)} file(s) touched")
