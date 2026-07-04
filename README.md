@@ -12,6 +12,14 @@ change is intentional (memory revises itself) or catch a regression before it sh
 
 Built on **Cognee Cloud** for the wemaekdev hackathon.
 
+> 🧱 **New: CodeMind as an architecture sandbox** — encode your system's
+> invariants as remembered decisions and CodeMind watches every PR for
+> violations. Live example: a PR that bypasses `get_llm_client()` and calls
+> `openai.OpenAI` directly is caught in CI, citing the LLM-access invariant,
+> from the shared graph with `local signals: 0`.
+> See [`ARCHITECTURE_SANDBOX.md`](ARCHITECTURE_SANDBOX.md) +
+> [live PR](https://github.com/divysinghvi/cognee/pull/2).
+
 ---
 
 ## The problem
