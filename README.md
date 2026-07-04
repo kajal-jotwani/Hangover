@@ -139,6 +139,13 @@ the same `detect_core()` that runs in CI on every PR.
   contradicts a graph decision returns `conflict: True` with `local signals: 0` —
   the catch comes entirely from the shared Cloud graph. Real data, not the
   scripted Redis PR.
+- **Live CI catch ([`LIVE_COGNEE_DEMO.md`](LIVE_COGNEE_DEMO.md))** — CodeMind's
+  own GitHub Action ran live on a within-fork PR on `divysinghvi/cognee` (a fork
+  of `topoteretes/cognee`) that silently hard-codes `max_retries=5` instead of
+  `GenericAPIAdapter.MAX_RETRIES`. Result: a red `CodeMind / memory` check + a
+  bot comment citing the MAX_RETRIES graph node — `local signals: 0`, caught
+  entirely from the shared Cloud graph, in real CI on real cognee code.
+  ([PR #1](https://github.com/divysinghvi/cognee/pull/1))
 
 The two true catches — a retry-policy refactor that silently moved off an
 established `GenericAPIAdapter.MAX_RETRIES` class constant, and a README using a
