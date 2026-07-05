@@ -1,6 +1,7 @@
 .venv/
 .env
 __pycache__/
+build/
 *.pyc
 memory_registry.json
 event_log.json
@@ -8,3 +9,7 @@ pending_conflict.json
 demo_repo/
 dashboard/index.html
 .DS_Store
+codemind.egg-info/
+codemind_ci.egg-info/
+dist/
+codemind_cognee_data_ids.json

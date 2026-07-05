@@ -69,7 +69,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install deps
-        run: pip install -e .
+        run: pip install -r .codemind/codemind-requirements.txt
 
       - name: Re-derive the conflict (no duplicate comment)
         env:
@@ -81,7 +81,7 @@ jobs:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
         run: |
-          python -m codemind.runtime.contradiction --repo . --no-post \
+          python .codemind/contradiction.py --repo . --no-post \
             --base "${{ steps.pr.outputs.base }}" \
             --head  "${{ steps.pr.outputs.head }}"
 
@@ -99,7 +99,7 @@ jobs:
           OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
         run: |
           if [ "${{ steps.cmd.outputs.action }}" = "confirm" ]; then
-            python -m codemind.runtime.reconcile confirm --ci --reason "${{ steps.cmd.outputs.reason }}"
+            python .codemind/reconcile.py confirm --ci --reason "${{ steps.cmd.outputs.reason }}"
           else
-            python -m codemind.runtime.reconcile reject --ci
+            python .codemind/reconcile.py reject --ci
           fi

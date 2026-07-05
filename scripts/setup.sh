@@ -13,13 +13,14 @@ bash scripts/seed_demo_repo.sh
 
 echo
 echo "==> 2. Ingest decisions into Cognee Cloud (Ollama Cloud for extraction + Cognee)"
-"$PY" ingest.py --repo demo_repo --reset
+"$PY" -m codemind.runtime.ingest --repo demo_repo --reset
 
 echo
 echo "==> 3. Pre-demo recall check (the 'before' answer the demo will compare against)"
 "$PY" -c "
-import asyncio, cognee_client
-from config import check_keys
+import asyncio
+from codemind.runtime import cognee_client
+from codemind.runtime.config import check_keys
 check_keys(need_cognee=True)
 async def go():
     await cognee_client.connect()

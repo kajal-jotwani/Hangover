@@ -21,7 +21,8 @@ beat "0:20–0:40  THE SEEDED MEMORY (the 'before' answer)"
 echo "  Cognee Cloud holds our team's durable decisions. Ask the repo a question:"
 echo "  > 'can I use an in-memory Map cache instead of Redis?'"
 "$PY" -c "
-import asyncio, cognee_client
+import asyncio
+from codemind.runtime import cognee_client
 async def go():
     await cognee_client.connect()
     for a in await cognee_client.recall_decisions('can I use an in-memory Map cache instead of Redis?'):
@@ -48,20 +49,21 @@ git commit -q -m "Replace Redis cache with in-memory Map for speed" -m "Drop the
 cd "$ROOT"
 echo "  Committed. Now CodeMind's contradiction agent runs over the diff:"
 echo
-"$PY" contradiction.py --repo demo_repo --branch demo-live
+"$PY" -m codemind.runtime.contradiction --repo demo_repo --branch demo-live
 pause
 
 beat "1:10–1:30  RECONCILIATION — confirm the change is intentional"
 echo "  The teammate confirms: yes, intentional. CodeMind revises its belief:"
 echo "    remember() the UPDATE  ->  forget() the old memory (surgical)  ->  improve()"
-"$PY" reconcile.py confirm --reason "we moved to a single-instance deployment, so a per-process cache no longer serves stale data"
+"$PY" -m codemind.runtime.reconcile confirm --reason "we moved to a single-instance deployment, so a per-process cache no longer serves stale data"
 pause
 
 beat "1:30–1:50  THE PROOF — a new teammate asks, and gets the CURRENT answer"
 echo "  Second terminal asks the SAME question: 'can I use an in-memory Map cache instead of Redis?'"
 echo "  The answer has CHANGED:"
 "$PY" -c "
-import asyncio, cognee_client
+import asyncio
+from codemind.runtime import cognee_client
 async def go():
     await cognee_client.connect()
     for a in await cognee_client.recall_decisions('can I use an in-memory Map cache instead of Redis?'):

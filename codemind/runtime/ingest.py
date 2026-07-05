@@ -17,17 +17,17 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
-import cognee_client
-import registry
-from config import DATASET_NAME, DEMO_REPO, check_keys
-from git_io import log_commits, log_commits_range
-from llm import extract_decision
+from codemind.runtime import cognee_client, registry
+from codemind.runtime.config import DATASET_NAME, DEMO_REPO, check_keys
+from codemind.runtime.git_io import log_commits, log_commits_range
+from codemind.runtime.llm import extract_decision
 
 console = Console()
 
 
 async def ingest(repo_path: str, *, reset: bool, since: str | None = None,
-                 head: str | None = None, dry_run: bool = False) -> None:
+                 head: str | None = None, dry_run: bool = False,
+                 max_count: int | None = None, since_date: str | None = None) -> None:
     check_keys(need_cognee=True, need_llm=True)
     # Dry-run still needs the LLM (to extract decisions) but NOT Cognee.
     if not dry_run:
@@ -49,7 +49,17 @@ async def ingest(repo_path: str, *, reset: bool, since: str | None = None,
         else:
             console.print("[dim]Reset: registry empty, starting fresh.[/dim]")
         registry.save_registry({})
-        cognee_client.seed_seen(set())  # clear seen-set for clean diffing
+        cognee_client.seed_seen(set())  # cleared registry -> empty dataset
+    else:
+        # Non-reset ingest: seed the seen-set with existing registry data_ids so
+        # the before/after diff can isolate the NEW id even on a non-empty
+        # dataset. Without this, the diff returns a random existing node id.
+        existing = registry.load_registry()
+        existing_ids = {v.get("data_id") for v in existing.values()
+                        if isinstance(v, dict) and v.get("data_id")}
+        cognee_client.seed_seen(existing_ids)
+        if existing_ids:
+            console.print(f"[dim]Seeding diff with {len(existing_ids)} known data_id(s).[/dim]")
 
     # Incremental range (auto-ingest on merge) vs full history walk.
     if since and head:
@@ -57,7 +67,7 @@ async def ingest(repo_path: str, *, reset: bool, since: str | None = None,
         console.print(f"[bold]Incremental[/bold] {since[:8]}..{head[:8]}: "
                       f"{len(commits)} new commit(s) in [cyan]{repo_path}[/cyan]\n")
     else:
-        commits = log_commits(repo_path)
+        commits = log_commits(repo_path, max_count=max_count, since=since_date)
         console.print(f"Found {len(commits)} commits in [cyan]{repo_path}[/cyan]\n")
 
     if dry_run:
@@ -89,6 +99,7 @@ async def ingest(repo_path: str, *, reset: bool, since: str | None = None,
             decision_id=decision_id,
             data_id=res["data_id"],
             sha=commit.sha,
+            commit_date=commit.date,
             decision=decision["decision"],
             rationale=decision["rationale"],
             scope=decision["scope"],
@@ -141,12 +152,17 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true",
                     help="extract decisions and print them, but do NOT call remember() "
                          "(no Cognee connection, no memory change)")
+    ap.add_argument("--depth", type=int, default=None,
+                    help="limit ingest to the newest N commits")
+    ap.add_argument("--since-date", default=None,
+                    help="only ingest commits after this date (git log --since format)")
     args = ap.parse_args()
     repo = args.repo if os.path.isabs(args.repo) else os.path.join(os.getcwd(), args.repo)
     if not os.path.isdir(os.path.join(repo, ".git")):
         sys.exit(f"Not a git repo: {repo}  (run scripts/seed_demo_repo.sh first)")
     asyncio.run(ingest(repo, reset=args.reset, since=args.since,
-                       head=args.head, dry_run=args.dry_run))
+                       head=args.head, dry_run=args.dry_run,
+                       max_count=args.depth, since_date=args.since_date))
 
 
 if __name__ == "__main__":

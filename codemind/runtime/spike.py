@@ -17,8 +17,8 @@ import inspect
 
 import cognee
 
-import cognee_client
-from config import DATASET_NAME, check_keys
+from codemind.runtime import cognee_client
+from codemind.runtime.config import DATASET_NAME, check_keys
 
 
 def _shape(label: str, obj: object) -> None:

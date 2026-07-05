@@ -17,17 +17,25 @@ def _run(args: list[str], cwd: str) -> str:
 @dataclass
 class Commit:
     sha: str
+    date: str
     message: str
     diff: str
     touched_files: list[str]
 
 
-def log_commits(repo_path: str, *, max_count: int = 100) -> list[Commit]:
-    """Walk history with patches. Returns oldest-first."""
-    raw = _run(
-        ["log", f"-{max_count}", "--pretty=CommitStart%n%H%n%s%n%b%nCommitEnd", "-p"],
-        repo_path,
-    )
+def log_commits(repo_path: str, *, max_count: int | None = 100,
+                since: str | None = None) -> list[Commit]:
+    """Walk history with patches. Returns oldest-first.
+
+    `since` is passed through to `git log --since` so callers can bound the walk
+    by date without slicing the result after the fact.
+    """
+    args = ["log", "--pretty=CommitStart%n%H%n%cI%n%s%n%b%nCommitEnd", "-p"]
+    if max_count is not None:
+        args.insert(2, f"-{max_count}")
+    if since:
+        args.extend(["--since", since])
+    raw = _run(args, repo_path)
     return _parse_log(raw)
 
 
@@ -58,13 +66,14 @@ def _parse_log(raw: str) -> list[Commit]:
             # commit with empty diff
             header = block.replace("\nCommitEnd", "")
             rest = ""
-        lines = header.split("\n", 2)
+        lines = header.split("\n", 3)
         sha = lines[0].strip()
-        subject = lines[1].strip() if len(lines) > 1 else ""
-        body = lines[2].strip() if len(lines) > 2 else ""
+        date = lines[1].strip() if len(lines) > 1 else ""
+        subject = lines[2].strip() if len(lines) > 2 else ""
+        body = lines[3].strip() if len(lines) > 3 else ""
         message = (subject + "\n\n" + body).strip()
         touched = _touched_files_from_diff(rest)
-        commits.append(Commit(sha=sha, message=message, diff=rest, touched_files=touched))
+        commits.append(Commit(sha=sha, date=date, message=message, diff=rest, touched_files=touched))
     commits.reverse()  # oldest-first
     return commits
 

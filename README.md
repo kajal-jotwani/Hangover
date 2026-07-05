@@ -91,7 +91,7 @@ i.e. the run's only memory was the graph populated by other repos' ingests. The
 dashboard pulls **16 live nodes** from the same shared graph.
 
 **Proven locally too (read-only):** with the local registry blanked (simulating
-repo B's no-registry state), `python contradiction.py --repo demo_repo --branch violation --no-post`
+repo B's no-registry state), `python -m codemind.runtime.contradiction --repo demo_repo --branch violation --no-post`
 still returns `conflict: True` citing *"Cache layer must be Redis"* — `local signals: 0`,
 `semantic recall: 1`, `graph nodes: 11`, all from the shared Cloud graph. The catch
 comes entirely from memory another repo populated.
@@ -163,17 +163,29 @@ timeline (feeds the dashboard).
 - `scripts/seed_demo_repo.sh` — builds demo_repo with 4 seeded decisions + violation/benign branches
 - `scripts/setup.sh` — one-time pre-demo prep (seed + ingest + recall check)
 - `scripts/run_demo.sh` — the scripted 2-minute walkthrough
-- `dashboard/build.py` — STRETCH: renders the memory graph + belief-changed timeline to HTML; pulls **live Cognee graph nodes** via `cognee.search(only_context=True)` and shows the Cognee lifecycle-API footprint
-- `scripts/spike_lifecycle.py` — live spike of the deeper Cognee APIs (`search`, `visualize`, `memify`, `datasets`) against the cloud tenant; documents which work vs. are blocked
+- `codemind dashboard` — STRETCH: renders the memory graph + belief-changed timeline to HTML; pulls **live Cognee graph nodes** via `cognee.search(only_context=True)` and shows the Cognee lifecycle-API footprint
+- `codemind doctor --cognee` — live spike of the deeper Cognee APIs (`search`, `visualize`, `memify`, `datasets`) against the cloud tenant; documents which work vs. are blocked
 
 ---
 
 ## Setup
 
-### 1. Environment
+### Primary path
 ```bash
-cd codemind
-python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt
+pip install codemind-ci        # from PyPI
+codemind init
+```
+
+For local development from this checkout:
+```bash
+python3.13 -m venv .venv && .venv/bin/pip install -e .
+codemind init
+```
+
+`codemind init` detects the git repo, validates the Cognee + Ollama credentials, writes `.env`, copies the GitHub Actions workflows, sets GitHub secrets when `gh` is available, stores a retention policy, and runs the first bounded ingest.
+
+### Manual / advanced setup
+```bash
 cp .env.example .env
 # Cognee Cloud:  COGNEE_URL (tenant API Base URL), COGNEE_API_KEY (X-Api-Key),
 #               COGNEE_TENANT_ID (X-Tenant-Id), COGNEE_USER_ID (X-User-Id)
@@ -181,13 +193,13 @@ cp .env.example .env
 # (optional: GH_TOKEN, GH_REPO, GH_PR_NUMBER for real PR comments)
 ```
 
-### 2. De-risk the thesis-critical verb (Phase 0 spike)
+### Phase 0 spike
 ```bash
-.venv/bin/python spike.py
+.venv/bin/python -m codemind.runtime.spike
 # expect: remembered 2 -> forgot 1 -> 1 remains. Confirms surgical forget() works.
 ```
 
-### 3. Prep the demo (once, before the camera rolls)
+### Prep the demo
 ```bash
 bash scripts/setup.sh
 # rebuilds demo_repo, ingests 4 decisions into Cognee, confirms the 'before' recall
@@ -213,26 +225,26 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 
 ### Manual control (for testing)
 ```bash
-.venv/bin/python contradiction.py --repo demo_repo --branch violation   # should flag the Redis decision
-.venv/bin/python contradiction.py --repo demo_repo --branch benign      # should stay quiet (same-file refactor)
-.venv/bin/python reconcile.py confirm --reason "intentional, rationale updated"
-.venv/bin/python reconcile.py reject
-.venv/bin/python dashboard/build.py && open dashboard/index.html        # stretch visual
+.venv/bin/python -m codemind.runtime.contradiction --repo demo_repo --branch violation   # should flag the Redis decision
+.venv/bin/python -m codemind.runtime.contradiction --repo demo_repo --branch benign      # should stay quiet (same-file refactor)
+.venv/bin/python -m codemind.runtime.reconcile confirm --reason "intentional, rationale updated"
+.venv/bin/python -m codemind.runtime.reconcile reject
+.venv/bin/codemind dashboard && open dashboard/index.html        # stretch visual
 ```
 
 ---
 
 ## Verification (end-to-end)
 
-1. `python spike.py` → remember 2, forget 1, 1 remains. (Phase 0 gate — surgical forget works.)
+1. `python -m codemind.runtime.spike` → remember 2, forget 1, 1 remains. (Phase 0 gate — surgical forget works.)
 2. `bash scripts/setup.sh` → rebuilds demo_repo, ingests 4 decisions; the pre-demo recall returns the clean **before** answer ("no, must use Redis"). Re-runnable: `--reset` surgically forgets every registry `data_id` (including any prior UPDATE) so the graph is clean each run.
-3. `python contradiction.py --branch violation` → conflict citing the Redis decision; `--branch benign` (a same-file `DEFAULT_TTL` refactor) → no conflict. **Both must hold.**
-4. `python reconcile.py confirm` → `event_log.json` gains remember+forget+improve; the contrastive recall now returns the **updated** belief ("yes, superseded"), different from step 2. (Proof the loop closed.)
-5. `python reconcile.py reject` → registry unchanged; recall answer unchanged. (Bug-caught branch verified.)
+3. `python -m codemind.runtime.contradiction --branch violation` → conflict citing the Redis decision; `--branch benign` (a same-file `DEFAULT_TTL` refactor) → no conflict. **Both must hold.**
+4. `python -m codemind.runtime.reconcile confirm` → `event_log.json` gains remember+forget+improve; the contrastive recall now returns the **updated** belief ("yes, superseded"), different from step 2. (Proof the loop closed.)
+5. `python -m codemind.runtime.reconcile reject` → registry unchanged; recall answer unchanged. (Bug-caught branch verified.)
 6. `bash scripts/run_demo.sh` → full walkthrough runs clean.
 7. **CI (every PR):** push the repo (with committed `memory_registry.json` + `.github/workflows/`) to GitHub, add the Cognee/Ollama secrets, open a PR with the Redis→Map change → `github-actions[bot]` posts the CodeMind conflict comment citing the cache decision; push another commit → **no duplicate** (idempotency); reply `/codemind confirm intentional, single-instance deploy` → after-recall comment shows the answer flipped ("superseded as of the update"); open a second PR with a different change → a fresh comment on that PR's number (proves it works on **all** PRs).
 8. **Green/red check:** a clean PR → `CodeMind / memory` → `success` ("No contradiction with past decisions"); a conflicting PR → `failure`. Both verified live (PRs #4 red, #6 green on this repo).
-9. **Auto-ingest (dry-run):** `python ingest.py --repo . --since <sha> --head <sha> --dry-run` → extracts decisions from the range and prints them, **without** calling `remember()`. Verified locally. The live `codemind-ingest.yml` runs the same in `--since`/`--head` mode on push to main (opt-in via `vars.CODEMIND_AUTO_INGEST=true`).
+9. **Auto-ingest (dry-run):** `python -m codemind.runtime.ingest --repo . --since <sha> --head <sha> --dry-run` → extracts decisions from the range and prints them, **without** calling `remember()`. Verified locally. The live `codemind-ingest.yml` runs the same in `--since`/`--head` mode on push to main (opt-in via `vars.CODEMIND_AUTO_INGEST=true`).
 10. **Cross-repo shared memory:** `bash scripts/setup_cross_repo.sh <you>/codemind-cross-b` → repo B (no local registry) catches a Redis→Map PR citing a decision remembered in repo A, via the shared Cloud graph. Mechanism already proven live: PR #6 ran with `local signals: 0` and the shared graph surfaced 12 nodes + the correct verdict.
 11. **Unit tests:** `.venv/bin/python -m unittest discover -s tests` → 11 tests covering the registry fuzzy-match (reconcile's data_id lookup), the hybrid-retrieval keyword/path signals, and the GitHub comment idempotency marker + graph-evidence formatting. (The fuzzy-match test caught a real punctuation bug — `Redis;` wasn't matching `redis` — now fixed.)
 
@@ -240,7 +252,7 @@ bash scripts/run_demo.sh   # press ENTER to advance each beat
 The terminal demo above is the thesis; this is the product running in real CI. Live artifacts on this repo to show on camera:
 1. **PR #4** (https://github.com/kajal-jotwani/Hangover/pull/4) — a teammate's Redis→Map PR. Show the bot comment with the **Graph evidence** block (cites the actual Cognee node *"Cache layer must be Redis"*) and the **red `CodeMind / memory` check** in the PR summary.
 2. **PR #6** (https://github.com/kajal-jotwani/Hangover/pull/6) — a clean PR. Show the **green `CodeMind / memory` check** ("No contradiction with past decisions"). Same check, green vs red.
-3. **Dashboard** — `python dashboard/build.py && open dashboard/index.html` → the live Cognee memory graph (16 nodes), the lifecycle-footprint badges, the belief-changed timeline. A static snapshot is pushed to the `gh-pages` branch; enable GitHub Pages (Settings → Pages → Source: `gh-pages`) to get a live linkable dashboard at `https://<owner>.github.io/<repo>/`.
+3. **Dashboard** — `codemind dashboard` → the live Cognee memory graph (16 nodes), the lifecycle-footprint badges, the belief-changed timeline. A static snapshot is pushed to the `gh-pages` branch; enable GitHub Pages (Settings → Pages → Source: `gh-pages`) to get a live linkable dashboard at `https://<owner>.github.io/<repo>/`.
 4. **Cross-repo (optional closer):** `bash scripts/setup_cross_repo.sh <you>/codemind-cross-b` → repo B catches the same mistake using a decision remembered in repo A — org-wide memory.
 5. **Reconcile (optional):** reply `/codemind confirm intentional, single-instance deploy` on PR #4 → the check flips red→green + an after-recall comment shows the answer changed. *(Mutates the demo graph — run `bash scripts/setup.sh` after to reset.)*
 

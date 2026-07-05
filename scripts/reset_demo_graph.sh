@@ -25,8 +25,9 @@ PY="$ROOT/.venv/bin/python"
 
 echo "==> 1. Forgetting every data_id ever recorded in event_log.json"
 "$PY" - <<'PY'
-import asyncio, json, cognee_client
-from config import check_keys
+import asyncio, json
+from codemind.runtime import cognee_client
+from codemind.runtime.config import check_keys
 check_keys(need_cognee=True, need_llm=False)
 async def main():
     await cognee_client.connect()
@@ -47,7 +48,7 @@ asyncio.run(main())
 PY
 
 echo "==> 2. Clearing local registry + event log"
-"$PY" -c "import registry; registry.save_registry({}); registry._write(__import__('config').EVENT_LOG_PATH, [])"
+"$PY" -c "from codemind.runtime import registry, config; registry.save_registry({}); registry._write(config.EVENT_LOG_PATH, [])"
 echo "  cleared memory_registry.json + event_log.json"
 
 echo "==> 3. Re-ingesting the 4 fresh demo decisions (setup.sh)"

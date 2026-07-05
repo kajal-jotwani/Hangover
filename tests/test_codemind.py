@@ -25,7 +25,7 @@ class _TempRegistryMixin:
     def _use_temp_registry(self, entries: dict) -> Path:
         tmp = Path(self._tmpdir) / "memory_registry.json"
         tmp.write_text(json.dumps(entries))
-        import registry
+        from codemind.runtime import registry
         registry.REGISTRY_PATH = tmp
         return tmp
 
@@ -45,23 +45,23 @@ class TestRegistryFuzzyMatch(_TempRegistryMixin, unittest.TestCase):
         })
 
     def test_exact_is_match(self):
-        import registry
+        from codemind.runtime import registry
         e = registry.find_by_decision_text("Cache layer must be Redis; never use in-memory Map caches; always use cacheGet/cacheSet")
         self.assertIsNotNone(e)
         self.assertEqual(e["data_id"], "abc-123")  # must map to the RIGHT memory
 
     def test_loose_word_overlap_matches(self):
-        import registry
+        from codemind.runtime import registry
         e = registry.find_by_decision_text("the cache should use redis not a map")
         self.assertIsNotNone(e)
         self.assertEqual(e["data_id"], "abc-123")
 
     def test_no_match_returns_none(self):
-        import registry
+        from codemind.runtime import registry
         self.assertIsNone(registry.find_by_decision_text("completely unrelated topic about cooking"))
 
     def test_skips_superseded(self):
-        import registry
+        from codemind.runtime import registry
         registry.upsert_entry("D2", status="superseded")
         self.assertIsNone(registry.find_by_decision_text("Cache layer must be Redis"))
 
@@ -77,7 +77,7 @@ class TestHybridRetrieval(_TempRegistryMixin, unittest.TestCase):
         })
 
     def test_keyword_overlap_surfaces_decision(self):
-        from contradiction import hybrid_retrieval
+        from codemind.runtime.contradiction import hybrid_retrieval
         # a diff mentioning cache + redis + map should hit D2 via keyword overlap
         diff = "export const store = new Map(); // switched from Redis cache to in-memory"
         out = hybrid_retrieval(diff, touched_files=["scratch/cache.ts"])
@@ -85,12 +85,12 @@ class TestHybridRetrieval(_TempRegistryMixin, unittest.TestCase):
                         f"expected Redis decision surfaced, got {out}")
 
     def test_path_scope_surfaces_decision(self):
-        from contradiction import hybrid_retrieval
+        from codemind.runtime.contradiction import hybrid_retrieval
         out = hybrid_retrieval("unrelated text", touched_files=["src/cache/index.ts"])
         self.assertTrue(any("Redis" in c for c in out))
 
     def test_unrelated_diff_no_signal(self):
-        from contradiction import hybrid_retrieval
+        from codemind.runtime.contradiction import hybrid_retrieval
         out = hybrid_retrieval("refactor the logger formatting", touched_files=["src/log.ts"])
         self.assertEqual(out, [])
 
@@ -100,7 +100,7 @@ class TestMonorepoScaling(unittest.TestCase):
     scale to large monorepo PRs. Pure logic, no network."""
 
     def test_split_diff_by_file_isolates_each_file_hunk(self):
-        from contradiction import _split_diff_by_file
+        from codemind.runtime.contradiction import _split_diff_by_file
         diff = (
             "diff --git a/services/payments/charge.ts b/services/payments/charge.ts\n"
             "+new Map() instead of redis\n"
@@ -115,7 +115,7 @@ class TestMonorepoScaling(unittest.TestCase):
         self.assertNotIn("fetch", hunks["services/payments/charge.ts"])
 
     def test_file_group_top_two_segments(self):
-        from contradiction import _file_group
+        from codemind.runtime.contradiction import _file_group
         self.assertEqual(_file_group("services/payments/charge.ts"), "services/payments")
         self.assertEqual(_file_group("services/auth/login.ts"), "services/auth")
         # shallow (flat-repo) files group by their full path — one group per file,
@@ -123,7 +123,7 @@ class TestMonorepoScaling(unittest.TestCase):
         self.assertEqual(_file_group("cache.ts"), "cache.ts")
 
     def test_group_hunks_collapses_files_to_subsystems(self):
-        from contradiction import _group_hunks, _split_diff_by_file
+        from codemind.runtime.contradiction import _group_hunks, _split_diff_by_file
         diff = (
             "diff --git a/services/payments/charge.ts b/services/payments/charge.ts\n+x\n"
             "diff --git a/services/payments/refund.ts b/services/payments/refund.ts\n+y\n"
@@ -135,13 +135,13 @@ class TestMonorepoScaling(unittest.TestCase):
         self.assertIn("charge.ts", groups["services/payments"] if "charge" in groups["services/payments"] else groups["services/payments"])
 
     def test_heaviest_groups_caps_and_orders_by_diff_size(self):
-        from contradiction import _group_hunks, _heaviest_groups
+        from codemind.runtime.contradiction import _group_hunks, _heaviest_groups
         groups = {"a/a": "x\n" * 50, "b/b": "y\n" * 5, "c/c": "z\n" * 30}
         out = _heaviest_groups(groups, cap=2)
         self.assertEqual(out, ["a/a", "c/c"])  # heaviest first, capped at 2
 
     def test_focused_diff_puts_relevant_files_first(self):
-        from contradiction import _split_diff_by_file, _focused_diff
+        from codemind.runtime.contradiction import _split_diff_by_file, _focused_diff
         diff = (
             "diff --git a/services/payments/charge.ts b/services/payments/charge.ts\n"
             "+REDIS_VIOLATION_MARKER\n"
@@ -157,7 +157,7 @@ class TestMonorepoScaling(unittest.TestCase):
         self.assertTrue(_focused_diff(hunks, []))
 
     def test_focused_diff_empty_when_no_hunks(self):
-        from contradiction import _focused_diff
+        from codemind.runtime.contradiction import _focused_diff
         self.assertEqual(_focused_diff({}, ["anything"]), "")
 
 
@@ -171,23 +171,23 @@ class TestScopeMatchedFiles(_TempRegistryMixin, unittest.TestCase):
         })
 
     def test_scope_match_surfaces_files_under_decision(self):
-        from contradiction import _scope_matched_files
+        from codemind.runtime.contradiction import _scope_matched_files
         matched = _scope_matched_files(["src/cache/index.ts", "src/log.ts", "services/cache/store.ts"])
         self.assertEqual(matched, ["src/cache/index.ts", "services/cache/store.ts"])
 
     def test_no_scope_no_match(self):
-        from contradiction import _scope_matched_files
+        from codemind.runtime.contradiction import _scope_matched_files
         self.assertEqual(_scope_matched_files(["src/log.ts", "README.md"]), [])
 
 
 class TestGithubComment(unittest.TestCase):
     def test_marker_is_head_sha_prefix(self):
-        from github import _marker
+        from codemind.runtime.github import _marker
         self.assertEqual(_marker("6a18520fb5cb"), "<!-- codemind:head=6a18520fb5cb -->")
         self.assertEqual(_marker("abc"), "<!-- codemind:head=abc -->")
 
     def test_format_comment_includes_graph_evidence(self):
-        from github import _format_comment
+        from codemind.runtime.github import _format_comment
         body = _format_comment(
             {"decision_violated": "Cache layer must be Redis",
              "explanation": "diff replaces Redis with a Map",
@@ -199,23 +199,23 @@ class TestGithubComment(unittest.TestCase):
         self.assertIn("<!-- codemind:head=6a18520fb5cb -->", body)
 
     def test_format_comment_omits_graph_section_when_no_nodes(self):
-        from github import _format_comment
+        from codemind.runtime.github import _format_comment
         body = _format_comment(
             {"decision_violated": "Cache layer must be Redis", "explanation": "x", "confidence": 0.9},
             sha="abc")
         self.assertNotIn("Graph evidence", body)
 
     def test_already_commented_detects_marker(self):
-        import github
+        from codemind.runtime import github
         with patch.dict(os.environ, {"GH_TOKEN": "t", "GH_REPO": "o/r", "GH_PR_NUMBER": "1"}):
             github.GH_TOKEN, github.GH_REPO, github.GH_PR_NUMBER = "t", "o/r", "1"
             fake = MagicMock()
             fake.status_code = 200
             fake.json.return_value = [{"body": "some comment\n<!-- codemind:head=6a18520fb5cb -->"}]
-            with patch("github.requests.get", return_value=fake):
+            with patch("codemind.runtime.github.requests.get", return_value=fake):
                 self.assertTrue(github._already_commented("6a18520fb5cbbbbb"))  # marker matches first 12
             fake.json.return_value = [{"body": "a different comment"}]
-            with patch("github.requests.get", return_value=fake):
+            with patch("codemind.runtime.github.requests.get", return_value=fake):
                 self.assertFalse(github._already_commented("ffffffffffff"))
 
 

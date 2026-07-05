@@ -20,7 +20,7 @@ from typing import Any
 
 import cognee
 
-from config import COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_URL, COGNEE_USER_ID, DATASET_NAME
+from codemind.runtime.config import COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_URL, COGNEE_USER_ID, DATASET_NAME
 
 _cloud_client = None
 
@@ -40,7 +40,8 @@ def seed_seen(ids: set[str]) -> None:
     _seen_data_ids.update(ids)
 
 
-async def connect() -> None:
+async def connect(*, url: str | None = None, api_key: str | None = None,
+                  tenant_id: str | None = None, user_id: str | None = None) -> None:
     """Route all Cognee ops to the Cloud tenant.
 
     cognee.serve() returns a CloudClient whose session only carries X-Api-Key.
@@ -49,16 +50,23 @@ async def connect() -> None:
     ignores them, required if your tenant needs them).
     """
     global _cloud_client
-    if not COGNEE_URL or not COGNEE_API_KEY:
+    resolved_url = url if url is not None else COGNEE_URL
+    resolved_api_key = api_key if api_key is not None else COGNEE_API_KEY
+    resolved_tenant_id = tenant_id if tenant_id is not None else COGNEE_TENANT_ID
+    resolved_user_id = user_id if user_id is not None else COGNEE_USER_ID
+    if not resolved_url or not resolved_api_key:
         raise SystemExit("COGNEE_URL / COGNEE_API_KEY not set in .env")
-    _cloud_client = await cognee.serve(url=COGNEE_URL, api_key=COGNEE_API_KEY)
-    _inject_headers(_cloud_client)
+    _cloud_client = await cognee.serve(url=resolved_url, api_key=resolved_api_key)
+    _inject_headers(_cloud_client, tenant_id=resolved_tenant_id, user_id=resolved_user_id)
 
 
-def _inject_headers(client) -> None:
+def _inject_headers(client, *, tenant_id: str | None = None,
+                    user_id: str | None = None) -> None:
     """Patch CloudClient._get_session so the aiohttp session includes the
     tenant/user headers alongside X-Api-Key."""
-    if not (COGNEE_TENANT_ID or COGNEE_USER_ID):
+    tenant = tenant_id if tenant_id is not None else COGNEE_TENANT_ID
+    user = user_id if user_id is not None else COGNEE_USER_ID
+    if not (tenant or user):
         return
     try:
         import aiohttp
@@ -68,10 +76,10 @@ def _inject_headers(client) -> None:
     async def _get_session_with_tenant():
         if client._session is None or client._session.closed:
             headers = {"X-Api-Key": client.api_key}
-            if COGNEE_TENANT_ID:
-                headers["X-Tenant-Id"] = COGNEE_TENANT_ID
-            if COGNEE_USER_ID:
-                headers["X-User-Id"] = COGNEE_USER_ID
+            if tenant:
+                headers["X-Tenant-Id"] = tenant
+            if user:
+                headers["X-User-Id"] = user
             client._session = aiohttp.ClientSession(
                 headers=headers, timeout=client.DEFAULT_TIMEOUT
             )

@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from config import EVENT_LOG_PATH, REGISTRY_PATH
+from codemind.runtime.config import EVENT_LOG_PATH, REGISTRY_PATH
 
 
 def _words(text: str) -> set[str]:
@@ -55,12 +55,15 @@ def upsert_entry(decision_id: str, **fields) -> None:
 
 
 def add_entry(*, decision_id: str, data_id: str | None, sha: str,
-              decision: str, rationale: str, scope: str, importance: float) -> None:
-    upsert_entry(
-        decision_id,
+              decision: str, rationale: str, scope: str, importance: float,
+              commit_date: str | None = None) -> None:
+    fields = dict(
         data_id=data_id, sha=sha, decision=decision, rationale=rationale,
         scope=scope, importance=importance, status="active",
     )
+    if commit_date is not None:
+        fields["commit_date"] = commit_date
+    upsert_entry(decision_id, **fields)
 
 
 def find_by_scope(touched_files: list[str]) -> list[dict]:

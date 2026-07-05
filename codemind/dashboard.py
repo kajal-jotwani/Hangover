@@ -1,13 +1,11 @@
-"""STRETCH — build a self-contained dashboard HTML from local state + live Cognee.
+"""Build a self-contained dashboard HTML from local state + live Cognee.
 
-  python dashboard/build.py  ->  dashboard/index.html (open in a browser)
+  codemind dashboard  ->  <repo_root>/dashboard/index.html (opens in a browser)
 
 Renders:
   - Current beliefs (active vs superseded-crossed-out) with importance scores
   - A 'belief changed' timeline from event_log.json (remember / forget / improve / reject)
   - LIVE Cognee memory graph nodes pulled via cognee.search(only_context=True)
-    (cognee.visualize() is blocked on the cloud tenant by a broken local-SQLite
-    path, so we render the graph content ourselves from the real retrieved nodes)
   - A Cognee lifecycle-API footprint badge (which verbs the project leans on)
 """
 from __future__ import annotations
@@ -15,14 +13,10 @@ from __future__ import annotations
 import asyncio
 import html
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from config import EVENT_LOG_PATH, REGISTRY_PATH, check_keys  # noqa: F401  (check_keys used in try)
-
-HERE = Path(__file__).resolve().parent
-OUT = HERE / "index.html"
+from codemind.runtime import cognee_client
+from codemind.runtime.config import check_keys
 
 # The Cognee lifecycle APIs CodeMind leans on — surfaced as a badge so judges
 # can see the footprint at a glance. (memify/improve are best-effort on cloud.)
@@ -41,12 +35,9 @@ def _read(p: Path, default):
 
 async def _live_nodes() -> list[str]:
     """Pull the actual Cognee graph nodes via cognee.search(only_context=True)."""
-    import cognee_client
-    from config import check_keys
     check_keys(need_cognee=True)
     await cognee_client.connect()
     try:
-        # A broad query so we surface as many remembered decisions as possible.
         nodes = await cognee_client.search_graph_nodes(
             "engineering decisions cache redis apiClient logger regex fetch", top_k=20)
     finally:
@@ -54,9 +45,15 @@ async def _live_nodes() -> list[str]:
     return nodes
 
 
-def build() -> None:
-    reg = _read(REGISTRY_PATH, {})
-    events = _read(EVENT_LOG_PATH, [])
+def build_dashboard(repo_root: Path, *, out_path: Path | None = None) -> Path:
+    """Render the dashboard HTML and return the path written."""
+    registry_path = repo_root / "memory_registry.json"
+    event_log_path = repo_root / "event_log.json"
+    out = out_path or (repo_root / "dashboard" / "index.html")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    reg = _read(registry_path, {})
+    events = _read(event_log_path, [])
     active = [e for e in reg.values() if e.get("status") == "active"]
     superseded = [e for e in reg.values() if e.get("status") == "superseded"]
 
@@ -90,12 +87,10 @@ def build() -> None:
         body = html.escape(json.dumps({k: v for k, v in ev.items() if k not in ("ts", "kind")}, ensure_ascii=False)[:160])
         timeline += f'<div class="ev"><span class="dot" style="background:{color}"></span><b>{kind}</b> {body}</div>'
 
-    # Lifecycle footprint badges
     badges = " ".join(
         f'<span class="badge" title="{html.escape(d)}">{n}</span>' for n, d in LIFECYCLE
     )
 
-    # Live Cognee graph nodes section
     if live_err:
         live_html = f'<div class="empty">Live Cognee graph unavailable: {html.escape(live_err)}</div>'
     elif live_nodes:
@@ -131,7 +126,7 @@ def build() -> None:
 <div style="margin-bottom:8px">{badges}</div>
 
 <h2>Current beliefs ({len(active)} active, {len(superseded)} superseded)</h2>
-<div class="grid">{''.join(card(e) for e in active) or '<div class="empty">No memories yet — run ingest.py</div>'}
+<div class="grid">{''.join(card(e) for e in active) or '<div class="empty">No memories yet — run codemind ingest</div>'}
 {''.join(card(e) for e in superseded)}</div>
 
 <h2>Live Cognee memory graph ({len(live_nodes)} nodes via cognee.search only_context)</h2>
@@ -141,10 +136,7 @@ def build() -> None:
 <div>{timeline or '<div class="empty">No events yet.</div>'}</div>
 
 </body></html>"""
-    OUT.write_text(doc)
-    print(f"Wrote {OUT}  ({len(active)} active, {len(superseded)} superseded, "
+    out.write_text(doc)
+    print(f"Wrote {out}  ({len(active)} active, {len(superseded)} superseded, "
           f"{len(events)} events, {len(live_nodes)} live nodes)")
-
-
-if __name__ == "__main__":
-    build()
+    return out
