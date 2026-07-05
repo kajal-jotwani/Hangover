@@ -21,7 +21,7 @@ from typing import Any
 
 from openai import OpenAI
 
-from config import OLLAMA_API_KEY, OLLAMA_BASE_URL, OLLAMA_MODEL
+from codemind.runtime.config import OLLAMA_API_KEY, OLLAMA_BASE_URL, OLLAMA_MODEL
 
 _client: OpenAI | None = None
 

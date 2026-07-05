@@ -21,11 +21,10 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
-import cognee_client
-import registry
-from config import DEMO_REPO, check_keys
-from git_io import diff_of_branch, diff_of_commit
-from llm import judge_contradiction
+from codemind.runtime import cognee_client, registry
+from codemind.runtime.config import DEMO_REPO, check_keys
+from codemind.runtime.git_io import diff_of_branch, diff_of_commit
+from codemind.runtime.llm import judge_contradiction
 
 console = Console()
 
@@ -271,7 +270,7 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
     if not candidates:
         console.print("[yellow]No relevant memories found — nothing to contradict.[/yellow]")
         if post_comment:
-            import github
+            from codemind.runtime import github
             github.post_commit_status(sha, "success", "No relevant memories — nothing to contradict")
         await cognee_client.disconnect()
         return {"conflict": False, "decision_violated": "", "explanation": "No relevant memories.", "confidence": 1.0}
@@ -294,7 +293,7 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
 
     if verdict["conflict"]:
         # post_or_print is sync; import here to avoid module-level requests cost
-        import github
+        from codemind.runtime import github
         github.post_or_print(verdict, sha=sha, post_comment=post_comment)
         entry = registry.find_by_decision_text(verdict.get("decision_violated", ""))
         if entry:
@@ -311,7 +310,7 @@ async def detect(repo_path: str, *, branch: str | None, head: str | None,
         # Clean PR: post a green check so CodeMind always shows up in the PR check
         # summary (green on clean, red on conflict). Lets the check be a *required*
         # status check that blocks merge on conflict but not on clean PRs.
-        import github
+        from codemind.runtime import github
         github.post_commit_status(sha, "success", "No contradiction with past decisions")
 
     await cognee_client.disconnect()

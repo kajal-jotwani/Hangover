@@ -14,8 +14,8 @@ import os
 import tempfile
 
 import cognee
-from cognee_client import connect, disconnect
-from config import DATASET_NAME, check_keys
+from codemind.runtime.cognee_client import connect, disconnect
+from codemind.runtime.config import DATASET_NAME, check_keys
 
 
 def _ser(x, limit=500):

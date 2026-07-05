@@ -154,9 +154,49 @@ requests>=2.31
 """
 
 
-def _codemind_repo_root() -> Path:
-    # codemind/onboarding.py -> the codemind repo root (where the sibling .py live).
-    return Path(__file__).resolve().parent.parent
+def _runtime_source_text(name: str) -> str:
+    """Read a runtime module's source from the installed codemind package.
+
+    Works from a wheel/sdist install (via importlib.resources) as well as an
+    editable checkout — the runtime modules ship inside ``codemind/runtime/``.
+    """
+    return (resources.files("codemind.runtime") / name).read_text()
+
+
+def _rewrite_runtime_imports(text: str) -> str:
+    """Rewrite package-relative runtime imports to bare sibling imports.
+
+    The runtime source lives in ``codemind/runtime/`` and imports its siblings
+    as ``from codemind.runtime import X`` / ``from codemind.runtime.X import Y``
+    so it works as a package submodule. When vendored into a target repo's
+    ``.codemind/`` and run as ``python .codemind/contradiction.py`` there is no
+    ``codemind`` package on sys.path — only the script's own directory — so those
+    imports become ``import X`` / ``from X import Y`` (sibling-relative).
+    """
+    import re
+
+    # from codemind.runtime import a, b, c  ->  import a, b, c
+    text = re.sub(
+        r"^(\s*)from codemind\.runtime import (.+)$",
+        r"\1import \2",
+        text,
+        flags=re.MULTILINE,
+    )
+    # from codemind.runtime.X import a, b  ->  from X import a, b
+    text = re.sub(
+        r"^(\s*)from codemind\.runtime\.(\w+) import (.+)$",
+        r"\1from \2 import \3",
+        text,
+        flags=re.MULTILINE,
+    )
+    # import codemind.runtime.X  ->  import X
+    text = re.sub(
+        r"^(\s*)import codemind\.runtime\.(\w+)(\s+as\s+\w+)?$",
+        r"\1import \2\3",
+        text,
+        flags=re.MULTILINE,
+    )
+    return text
 
 
 def vendor_codemind(repo_root: Path, *, force: bool = False) -> list[Path]:
@@ -165,19 +205,24 @@ def vendor_codemind(repo_root: Path, *, force: bool = False) -> list[Path]:
     The workflows run `python .codemind/contradiction.py` / `reconcile.py` /
     `ingest.py`; those import their siblings (config, cognee_client, ...) which
     sit next to them in .codemind/ (Python puts the script's dir on sys.path).
+    Source is read from the installed ``codemind.runtime`` package via
+    importlib.resources and its package-relative imports are rewritten to bare
+    sibling imports so the vendored copies run standalone with no codemind
+    package installed.
     """
     target = repo_root / ".codemind"
     target.mkdir(parents=True, exist_ok=True)
-    src_root = _codemind_repo_root()
     copied: list[Path] = []
     for name in RUNTIME_FILE_NAMES:
-        src = src_root / name
-        if not src.exists():
+        try:
+            src_text = _runtime_source_text(name)
+        except (FileNotFoundError, ModuleNotFoundError):
             continue
+        rewritten = _rewrite_runtime_imports(src_text)
         dst = target / name
-        if dst.exists() and not force and dst.read_text() == src.read_text():
+        if dst.exists() and not force and dst.read_text() == rewritten:
             continue
-        dst.write_text(src.read_text())
+        dst.write_text(rewritten)
         copied.append(dst)
     req = target / "codemind-requirements.txt"
     req.write_text(CODEMIND_REQUIREMENTS)
@@ -232,11 +277,17 @@ def gh_repo_exists(repo: str) -> bool:
 
 
 def gh_secret_commands(repo: str, values: dict[str, str]) -> list[str]:
+    """Return safe-to-echo `gh secret set` commands for the missing secrets.
+
+    The command does NOT embed the secret value — `gh secret set <KEY>` reads it
+    from an interactive prompt — so the values never hit terminal scroll, shell
+    history, or CI logs. Only keys whose value is present are listed (those are
+    the ones `set_repo_secrets` would have pushed).
+    """
     commands = []
     for key in REQUIRED_ENV_KEYS + OPTIONAL_ENV_KEYS:
-        value = values.get(key)
-        if value:
-            commands.append(f"printf '%s' '{value}' | gh secret set {key} --repo {repo}")
+        if values.get(key):
+            commands.append(f"gh secret set {key} --repo {repo}   # paste the value when prompted")
     return commands
 
 
@@ -279,7 +330,7 @@ def set_repo_variable(repo: str, key: str, value: str) -> bool:
 
 
 async def validate_cognee_credentials(*, url: str, api_key: str, tenant_id: str = "", user_id: str = "") -> ValidationResult:
-    import cognee_client
+    from codemind.runtime import cognee_client
 
     try:
         await cognee_client.connect(url=url, api_key=api_key, tenant_id=tenant_id, user_id=user_id)

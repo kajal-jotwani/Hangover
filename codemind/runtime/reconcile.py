@@ -22,9 +22,8 @@ import time
 from rich.console import Console
 from rich.panel import Panel
 
-import cognee_client
-import registry
-from config import PENDING_CONFLICT_PATH, check_keys
+from codemind.runtime import cognee_client, registry
+from codemind.runtime.config import PENDING_CONFLICT_PATH, check_keys
 
 console = Console()
 
@@ -111,7 +110,7 @@ async def confirm(conflict: dict, *, reason: str, query: str | None = None, ci: 
     if ci:
         _post_after_comment("confirm", conflict, reason, proof_query, answers)
         # The conflict is resolved — flip the commit status from failure → success.
-        import github
+        from codemind.runtime import github
         github.post_commit_status(conflict.get("sha", ""),
                                   "success", "Memory updated — old belief crossed out")
     await cognee_client.disconnect()
@@ -133,7 +132,7 @@ async def reject(conflict: dict, *, query: str | None = None, ci: bool = False) 
         _post_after_comment("reject", conflict, "", proof_query, answers)
         # The bug branch: open a GitHub issue tracking the caught regression, and
         # keep the commit status red so it blocks merge.
-        import github
+        from codemind.runtime import github
         dec = conflict.get("decision_violated", "").replace("\n", " ")[:200]
         sha = conflict.get("sha", "")[:12]
         github.create_issue(
@@ -170,7 +169,7 @@ def _proof_query_for(conflict: dict) -> str:
 def _post_after_comment(action: str, conflict: dict, reason: str,
                          query: str, answers: list[str]) -> None:
     """In CI, surface the after-recall result as a PR comment (the loop-closing beat)."""
-    import github
+    from codemind.runtime import github
     dec = conflict.get("decision_violated", "")
     head = ("✅" if action == "confirm" else "⛔")
     title = "memory updated — old belief crossed out" if action == "confirm" \

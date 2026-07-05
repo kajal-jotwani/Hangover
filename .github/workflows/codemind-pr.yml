@@ -39,7 +39,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install -e .
 
       - name: Detect contradictions in the PR diff
         env:
@@ -56,6 +56,6 @@ jobs:
           OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
           OLLAMA_MODEL: ${{ secrets.OLLAMA_MODEL }}
         run: |
-          python contradiction.py --repo . \
+          python -m codemind.runtime.contradiction --repo . \
             --base "${{ github.event.pull_request.base.sha }}" \
             --head  "${{ github.event.pull_request.head.sha }}"

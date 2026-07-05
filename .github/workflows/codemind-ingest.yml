@@ -34,7 +34,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install deps
-        run: pip install -r requirements.txt
+        run: pip install -e .
 
       - name: Remember decisions from the newly-merged commits
         env:
@@ -53,7 +53,7 @@ jobs:
           # there's no range to walk — ingest just the landing commit.
           if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
             echo "No 'before' SHA (first push / force-push) — ingesting the landing commit only."
-            python ingest.py --repo . --since "$AFTER~1" --head "$AFTER"
+            python -m codemind.runtime.ingest --repo . --since "$AFTER~1" --head "$AFTER"
           else
-            python ingest.py --repo . --since "$BEFORE" --head "$AFTER"
+            python -m codemind.runtime.ingest --repo . --since "$BEFORE" --head "$AFTER"
           fi

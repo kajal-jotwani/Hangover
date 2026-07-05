@@ -20,7 +20,7 @@ from typing import Any
 
 import cognee
 
-from config import COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_URL, COGNEE_USER_ID, DATASET_NAME
+from codemind.runtime.config import COGNEE_API_KEY, COGNEE_TENANT_ID, COGNEE_URL, COGNEE_USER_ID, DATASET_NAME
 
 _cloud_client = None
 

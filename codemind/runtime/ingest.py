@@ -17,11 +17,10 @@ import sys
 from rich.console import Console
 from rich.panel import Panel
 
-import cognee_client
-import registry
-from config import DATASET_NAME, DEMO_REPO, check_keys
-from git_io import log_commits, log_commits_range
-from llm import extract_decision
+from codemind.runtime import cognee_client, registry
+from codemind.runtime.config import DATASET_NAME, DEMO_REPO, check_keys
+from codemind.runtime.git_io import log_commits, log_commits_range
+from codemind.runtime.llm import extract_decision
 
 console = Console()
 

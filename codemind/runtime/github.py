@@ -17,8 +17,8 @@ import os
 
 import requests
 
-from config import GH_PR_NUMBER, GH_REPO, GH_TOKEN, PENDING_CONFLICT_PATH
-from registry import load_registry
+from codemind.runtime.config import GH_PR_NUMBER, GH_REPO, GH_TOKEN, PENDING_CONFLICT_PATH
+from codemind.runtime.registry import load_registry
 
 _GH_API = "https://api.github.com"
 
@@ -52,7 +52,7 @@ def _format_comment(conflict: dict, *, sha: str = "") -> str:
     expl = conflict.get("explanation", "")
     importance = ""
     src = sha
-    from registry import find_by_decision_text
+    from codemind.runtime.registry import find_by_decision_text
     entry = find_by_decision_text(dec)
     if entry:
         importance = f"\n(memory importance: {entry.get('importance', '?')})"

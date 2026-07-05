@@ -6,9 +6,15 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
-from config import ROOT
+POLICY_FILENAME = "codemind_config.json"
 
-POLICY_PATH = ROOT / "codemind_config.json"
+
+def _resolve_root(repo_root: Path | None) -> Path:
+    if repo_root is not None:
+        return Path(repo_root)
+    # Late import to avoid pulling onboarding's deps at module import time.
+    from codemind.onboarding import discover_repo_root
+    return discover_repo_root()
 
 
 @dataclass
@@ -21,7 +27,7 @@ class MemoryPolicy:
 
 
 def load_policy(repo_root: Path | None = None) -> MemoryPolicy:
-    path = (repo_root or ROOT) / "codemind_config.json"
+    path = _resolve_root(repo_root) / POLICY_FILENAME
     if not path.exists():
         return MemoryPolicy()
     try:
@@ -38,7 +44,7 @@ def load_policy(repo_root: Path | None = None) -> MemoryPolicy:
 
 
 def save_policy(policy: MemoryPolicy, repo_root: Path | None = None) -> Path:
-    path = (repo_root or ROOT) / "codemind_config.json"
+    path = _resolve_root(repo_root) / POLICY_FILENAME
     path.write_text(json.dumps(asdict(policy), indent=2) + "\n")
     return path
 

@@ -5,7 +5,6 @@ import importlib
 import json
 import os
 import subprocess
-import sys
 import webbrowser
 from collections import Counter
 from pathlib import Path
@@ -16,6 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from codemind import __version__
 from codemind.memory_policy import MemoryPolicy, decay_importance, prune_candidates, save_policy
 from codemind.onboarding import (
     copy_workflows,
@@ -38,26 +38,34 @@ from codemind.onboarding import (
 console = Console()
 
 
-def _mods() -> dict[str, Any]:
-    import config
-    import cognee_client
-    import contradiction
-    import ingest as ingest_module
-    import registry
+def _mods(*, light: bool = False) -> dict[str, Any]:
+    """Reload the runtime modules so they pick up the current repo root + .env.
+
+    ``light=True`` skips the heavy Cognee-backed modules (cognee_client,
+    contradiction, ingest) — used by pure-local commands like ``status`` and
+    ``memory status`` so they don't spin up the graph client just to read a
+    JSON file.
+    """
+    from codemind.runtime import config, registry
 
     config = importlib.reload(config)
+    registry = importlib.reload(registry)
+    out: dict[str, Any] = {"registry": registry, "ROOT": config.ROOT}
+    if light:
+        return out
+
+    from codemind.runtime import cognee_client, contradiction
+    from codemind.runtime import ingest as ingest_module
+
     cognee_client = importlib.reload(cognee_client)
     contradiction = importlib.reload(contradiction)
     ingest_module = importlib.reload(ingest_module)
-    registry = importlib.reload(registry)
-
-    return {
+    out.update({
         "cognee_client": cognee_client,
         "contradiction": contradiction,
         "ingest_module": ingest_module,
-        "registry": registry,
-        "ROOT": config.ROOT,
-    }
+    })
+    return out
 
 
 def _repo_root_or_fail() -> Path:
@@ -318,7 +326,7 @@ async def _init_flow(repo_root: Path, *, yes: bool, values: dict[str, str], forc
     )
 
     os.environ.update({k: v for k, v in env_values.items() if v is not None})
-    _mods()
+    _mods(light=True)  # reload config so the runtime sees the freshly-written .env
 
     copied = []
     vendored = []
@@ -372,8 +380,9 @@ async def _init_flow(repo_root: Path, *, yes: bool, values: dict[str, str], forc
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
+@click.version_option(__version__, prog_name="codemind")
 def main() -> None:
-    """CodeMind CLI."""
+    """CodeMind — gives your repo a memory that catches contradictions on PRs."""
 
 
 @main.command(name="init")
@@ -398,6 +407,7 @@ def init(yes: bool, dataset: str | None, depth: int | None, since: str | None, s
          cognee_url: str | None, cognee_api_key: str | None, cognee_tenant_id: str | None,
          cognee_user_id: str | None, ollama_api_key: str | None, ollama_model: str | None,
          ollama_base_url: str | None) -> None:
+    """Set up CodeMind in this repo: validate creds, write .env + policy, vendor the CI runtime, copy workflows, and (optionally) push gh secrets."""
     repo_root = _repo_root_or_fail()
     explicit = {
         "COGNEE_URL": cognee_url,
@@ -422,6 +432,7 @@ def init(yes: bool, dataset: str | None, depth: int | None, since: str | None, s
 @click.option("--head", default=None, help="head SHA for an incremental range ingest")
 @click.option("--dry-run", is_flag=True, help="extract decisions but do not remember them")
 def ingest(repo: str, reset: bool, depth: int | None, since: str | None, head: str | None, dry_run: bool) -> None:
+    """Extract durable decisions from commit history and remember() them into the Cognee graph."""
     repo_root = Path(repo).resolve() if Path(repo).is_absolute() else (discover_repo_root() / repo).resolve()
     asyncio.run(_ingest_flow(repo_root, reset=reset, depth=depth, since=since, head=head, dry_run=dry_run))
 
@@ -434,7 +445,7 @@ def memory() -> None:
 @memory.command(name="status")
 def memory_status() -> None:
     """Show registry and event-log health."""
-    mods = _mods()
+    mods = _mods(light=True)
     registry = mods["registry"]
     events = registry.load_events()
     active = registry.all_active()
@@ -499,7 +510,7 @@ def memory_forget(decision_text: str) -> None:
 @click.option("--cross-repo", is_flag=True, help="show shared-graph results not present in local registry")
 def status(cross_repo: bool) -> None:
     """Health check for env, workflow files, registry, and memory policy."""
-    mods = _mods()
+    mods = _mods(light=not cross_repo)
     root = mods["ROOT"]
     registry = mods["registry"]
     env_path = _env_path(root)
@@ -551,7 +562,7 @@ def reconcile() -> None:
 @click.option("--query", default=None, help="override the proof recall query")
 def reconcile_confirm(reason: str, query: str | None) -> None:
     """Mark the latest conflict intentional: remember UPDATE, forget old, improve, re-ask."""
-    import reconcile as reconcile_module
+    from codemind.runtime import reconcile as reconcile_module
     asyncio.run(reconcile_module._run("confirm", None, reason, query, ci=False))
 
 
@@ -559,7 +570,7 @@ def reconcile_confirm(reason: str, query: str | None) -> None:
 @click.option("--query", default=None, help="override the proof recall query")
 def reconcile_reject(query: str | None) -> None:
     """Mark the latest conflict a bug: NO memory change, re-ask to confirm the old belief."""
-    import reconcile as reconcile_module
+    from codemind.runtime import reconcile as reconcile_module
     asyncio.run(reconcile_module._run("reject", None, "", query, ci=False))
 
 
@@ -567,7 +578,7 @@ def reconcile_reject(query: str | None) -> None:
 @click.option("--cognee", is_flag=True, help="run extra Cognee lifecycle checks")
 def doctor(cognee: bool) -> None:
     """Deeper diagnostics for repo state and cloud connectivity."""
-    mods = _mods()
+    mods = _mods(light=True)
     root = mods["ROOT"]
     env = _read_env(_env_path(root))
     lines = [f"git repo: {'yes' if is_git_repo(root) else 'no'}"]
@@ -592,15 +603,9 @@ def doctor(cognee: bool) -> None:
     lines.append(f"ollama: {'ok' if ollama_result.ok else 'blocked'}")
     lines.append(ollama_result.message)
     if cognee:
-        spike = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve().parent.parent / "scripts" / "spike_lifecycle.py")],
-            cwd=root,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        from codemind.lifecycle_spike import run_lifecycle_spike
         lines.append("cognee lifecycle spike:")
-        lines.extend([line for line in spike.stdout.splitlines() if line.startswith(("===", "OK", "FAIL", "TIMEOUT"))])
+        lines.extend(run_lifecycle_spike(repo_root=root))
     console.print("\n".join(lines))
 
 
@@ -608,9 +613,11 @@ def doctor(cognee: bool) -> None:
 @click.option("--open/--no-open", default=True, help="open the generated dashboard in a browser")
 def dashboard(open: bool) -> None:
     """Build the dashboard HTML and optionally open it."""
-    subprocess.run([sys.executable, str(Path(__file__).resolve().parent.parent / "dashboard" / "build.py")], check=False)
+    from codemind.dashboard import build_dashboard
+    repo_root = discover_repo_root()
+    out = build_dashboard(repo_root)
     if open:
-        webbrowser.open((Path(__file__).resolve().parent.parent / "dashboard" / "index.html").as_uri())
+        webbrowser.open(out.as_uri())
 
 
 @main.command(name="link")

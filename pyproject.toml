@@ -1,13 +1,28 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codemind"
-version = "0.1.0"
-description = "CodeMind CLI"
+name = "codemind-ci"
+dynamic = ["version"]
+description = "CodeMind — gives your repo a memory that catches contradictions on PRs"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Kajal Jotwani", email = "kajaljotwani06@gmail.com"}]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Quality Assurance",
+  "Topic :: Software Development :: Version Control :: Git",
+]
 dependencies = [
   "click>=8.1",
   "cognee>=1.0.0",
@@ -19,8 +34,18 @@ dependencies = [
   "requests>=2.31",
 ]
 
+[project.urls]
+Repository = "https://github.com/kajal-jotwani/Hangover"
+Issues = "https://github.com/kajal-jotwani/Hangover/issues"
+
+[project.optional-dependencies]
+dev = ["build", "twine", "pytest"]
+
 [project.scripts]
 codemind = "codemind.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "codemind.__version__"}
 
 [tool.setuptools]
 include-package-data = true

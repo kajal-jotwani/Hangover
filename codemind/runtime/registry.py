@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from config import EVENT_LOG_PATH, REGISTRY_PATH
+from codemind.runtime.config import EVENT_LOG_PATH, REGISTRY_PATH
 
 
 def _words(text: str) -> set[str]:
