@@ -163,8 +163,8 @@ timeline (feeds the dashboard).
 - `scripts/seed_demo_repo.sh` — builds demo_repo with 4 seeded decisions + violation/benign branches
 - `scripts/setup.sh` — one-time pre-demo prep (seed + ingest + recall check)
 - `scripts/run_demo.sh` — the scripted 2-minute walkthrough
-- `dashboard/build.py` — STRETCH: renders the memory graph + belief-changed timeline to HTML; pulls **live Cognee graph nodes** via `cognee.search(only_context=True)` and shows the Cognee lifecycle-API footprint
-- `scripts/spike_lifecycle.py` — live spike of the deeper Cognee APIs (`search`, `visualize`, `memify`, `datasets`) against the cloud tenant; documents which work vs. are blocked
+- `codemind dashboard` — STRETCH: renders the memory graph + belief-changed timeline to HTML; pulls **live Cognee graph nodes** via `cognee.search(only_context=True)` and shows the Cognee lifecycle-API footprint
+- `codemind doctor --cognee` — live spike of the deeper Cognee APIs (`search`, `visualize`, `memify`, `datasets`) against the cloud tenant; documents which work vs. are blocked
 
 ---
 
